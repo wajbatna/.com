@@ -10,10 +10,14 @@
 //   و API restrictions -> Generative Language API فقط.
 // -----------------------------------------------------------------------
 
-export const GEMINI_API_KEY = "AQ.Ab8RN6IwbVsarzMbAqby2SaY9l82buOet9UZXgxwabKgU3zBBQ";
+export const GEMINI_API_KEY = ""; // غير مستعمل عند وجود الوسيط (المفتاح محفوظ كـ Secret في Cloudflare)
 
 // وضع التشخيص: true = يعرض سبب الفشل داخل المحادثة (بدون المفتاح).
 // غيّره إلى false بعد حل المشكلة.
+// اتركه فارغاً للاتصال المباشر بـ Gemini. إذا أنشأت وسيطاً (Cloudflare Worker) ضع رابطه هنا،
+// وعندها لا يُرسل المفتاح من المتصفح ويمكنك وضع GEMINI_API_KEY فارغاً.
+export const GEMINI_PROXY_URL = "https://wajbatna.wajbatna7.workers.dev";
+
 export const AI_DEBUG = true;
 
 export const GEMINI_ENDPOINT =
