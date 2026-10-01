@@ -18,7 +18,7 @@ export const GEMINI_ENDPOINT =
 // حدود مناسبة للاستخدام المجاني
 export const AI_LIMITS = {
   maxInputChars: 300, // أقصى طول لرسالة المستخدم
-  maxOutputTokens: 700, // أقصى طول لرد Gemini
+  maxOutputTokens: 2048, // أقصى طول لرد Gemini
   historyTurns: 6, // عدد الرسائل الأخيرة المرسلة كسياق
   historyCharsPerTurn: 500, // اقتطاع كل رسالة من السياق
   cooldownMs: 3000, // أقل فاصل بين رسالتين
