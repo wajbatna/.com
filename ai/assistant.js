@@ -3,7 +3,7 @@
 // ولا يكتب أي شيء في Firestore ولا ينفذ أي عملية إدارية.
 import { db, auth } from "../firebase.js";
 import { getLang } from "../i18n.js";
-import { AI_LIMITS } from "./config.js";
+import { AI_LIMITS, AI_DEBUG } from "./config.js";
 import { askGemini, GeminiError } from "./gemini.js";
 import {
   collection,
@@ -590,7 +590,11 @@ async function send(raw) {
       state.blockedUntil = Date.now() + AI_LIMITS.rateLimitCooldownMs;
       msg = s.rate;
     }
-    addMessage("bot", msg, { noCopy: true }); // بدون أي تفاصيل تقنية
+    if (AI_DEBUG) {
+      const k = e && e.kind ? e.kind : "unknown";
+      msg += "\n[debug] " + k + (e && e.status ? " " + e.status : "") + (e && e.detail ? " - " + e.detail : "") + (e && !e.kind ? " - " + (e && e.message) : "");
+    }
+    addMessage("bot", msg, { noCopy: true }); // بدون أي تفاصيل تقنية (ما لم يفعّل AI_DEBUG)
   } finally {
     if (myToken === state.token) {
       state.busy = false;
