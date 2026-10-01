@@ -10,7 +10,7 @@
 //   و API restrictions -> Generative Language API فقط.
 // -----------------------------------------------------------------------
 
-export const GEMINI_API_KEY = "AQ.Ab8RN6JV64hqfPccw1Zx23pj_NC-0Pb4a3YEzIhRHOWLJjOoIA";
+export const GEMINI_API_KEY = "AIzaSyCbI656cHr1l3bh5MRXdEPJFJBcoNSvbAo";
 
 // وضع التشخيص: true = يعرض سبب الفشل داخل المحادثة (بدون المفتاح).
 // غيّره إلى false بعد حل المشكلة.
