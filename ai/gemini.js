@@ -35,6 +35,12 @@ async function requestOnce(body) {
   if (!res.ok) {
     const err = new GeminiError("http");
     err.status = res.status;
+    try {
+      const j = await res.json();
+      err.detail = j && j.error && j.error.message ? String(j.error.message).slice(0, 300) : "";
+    } catch (e) {
+      err.detail = "";
+    }
     throw err;
   }
   try {
@@ -59,6 +65,9 @@ export async function askGemini(systemText, contents) {
   for (;;) {
     try {
       const data = await requestOnce(body);
+      if (data.candidates && data.candidates[0] && data.candidates[0].finishReason && data.candidates[0].finishReason !== "STOP") {
+        console.warn("[Wajbatna AI] finishReason:", data.candidates[0].finishReason);
+      }
       if (data.promptFeedback && data.promptFeedback.blockReason) throw new GeminiError("blocked");
       const parts = data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts;
       const text = Array.isArray(parts) ? parts.map((p) => (typeof p.text === "string" ? p.text : "")).join("").trim() : "";
@@ -71,6 +80,8 @@ export async function askGemini(systemText, contents) {
         await sleep(1200);
         continue;
       }
+      // تشخيص في وحدة التحكم فقط (بدون المفتاح) ولا يظهر للمستخدم
+      console.warn("[Wajbatna AI]", e && e.kind, e && e.status ? e.status : "", e && e.detail ? e.detail : "");
       throw e instanceof GeminiError ? e : new GeminiError("network");
     }
   }
