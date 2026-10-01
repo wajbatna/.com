@@ -1,5 +1,5 @@
 // ai/gemini.js — الاتصال المباشر بـ Google Gemini API عبر fetch
-import { GEMINI_API_KEY, GEMINI_ENDPOINT, AI_LIMITS } from "./config.js";
+import { GEMINI_API_KEY, GEMINI_ENDPOINT, GEMINI_PROXY_URL, AI_LIMITS } from "./config.js";
 
 export class GeminiError extends Error {
   constructor(kind) {
@@ -17,12 +17,12 @@ async function requestOnce(body) {
   const timer = setTimeout(() => ctrl.abort(), AI_LIMITS.timeoutMs);
   let res;
   try {
-    res = await fetch(GEMINI_ENDPOINT, {
+    const url = GEMINI_PROXY_URL || GEMINI_ENDPOINT;
+    const headers = { "Content-Type": "application/json" };
+    if (!GEMINI_PROXY_URL) headers["X-goog-api-key"] = GEMINI_API_KEY; // مع الوسيط يبقى المفتاح على الخادم
+    res = await fetch(url, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-goog-api-key": GEMINI_API_KEY,
-      },
+      headers,
       body: JSON.stringify(body),
       signal: ctrl.signal,
     });
@@ -52,7 +52,7 @@ async function requestOnce(body) {
 
 // contents: [{ role: "user"|"model", parts: [{ text }] }]
 export async function askGemini(systemText, contents) {
-  if (!GEMINI_API_KEY || GEMINI_API_KEY.startsWith("PUT_YOUR")) throw new GeminiError("config");
+  if (!GEMINI_PROXY_URL && (!GEMINI_API_KEY || GEMINI_API_KEY.startsWith("PUT_YOUR"))) throw new GeminiError("config");
   const body = {
     systemInstruction: { parts: [{ text: systemText }] },
     contents,
