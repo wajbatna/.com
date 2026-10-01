@@ -12,6 +12,10 @@
 
 export const GEMINI_API_KEY = "AQ.Ab8RN6L-CR91hawkFwbMZH7tZofnAI-lxMWwii-h2w76qAx6rw";
 
+// وضع التشخيص: true = يعرض سبب الفشل داخل المحادثة (بدون المفتاح).
+// غيّره إلى false بعد حل المشكلة.
+export const AI_DEBUG = true;
+
 export const GEMINI_ENDPOINT =
   "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent";
 
