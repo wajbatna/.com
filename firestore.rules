@@ -1,0 +1,588 @@
+rules_version = '2';
+
+// ════════════════════════════════════════════════════════════════════════
+//  قواعد أمان Firestore — وجبتنا / Wajbatna  (نسخة الإنتاج)
+//
+//  المبادئ:
+//   • كل شيء ممنوع افتراضياً؛ أي مجموعة غير مذكورة هنا مغلقة بالكامل.
+//   • الأدمين = حساب Firebase Auth عندو وثيقة بنفس الـ uid فمجموعة admins
+//     (هاد الوثيقة كتتكتب غير من Firebase Console، والموقع ما يقدرش يكتب فيها).
+//   • الزبون ما يقدرش يقرا/يعدل إلا الوثائق ديالو هو.
+//   • كل كتابة من الزبون كتتفحص: الحقول المسموحة فقط + الأنواع + القيم.
+// ════════════════════════════════════════════════════════════════════════
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ───────────── دوال مساعدة ─────────────
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(uid) {
+      return request.auth != null && request.auth.uid == uid;
+    }
+
+    // أدمين حقيقي: وثيقة admins/{uid} خاصها تكون موجودة (ما كتتكتبش من الموقع)
+    function isAdmin() {
+      return request.auth != null &&
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+
+    // ───────────── admins ─────────────
+
+    // كل حساب يقدر يتأكد من وثيقتو هو فقط (admin.js كيستعملها). كتابة/سرد: ممنوع نهائياً.
+    match /admins/{uid} {
+      allow get: if isOwner(uid);
+      allow list, write: if false;
+    }
+
+    // ───────────── meals (الأطباق) ─────────────
+
+    function validMeal(d) {
+      return d.name is string && d.name.size() > 0 && d.name.size() <= 200
+        && d.category in ['breakfast', 'lunch', 'dinner']
+        && d.price is number && d.price >= 0 && d.price <= 1000000
+        && d.get('description', '') is string && d.get('description', '').size() <= 5000
+        && d.get('image', '') is string && d.get('image', '').size() <= 500000;
+    }
+
+    // القراءة عامة (الموقع العام كيعرضها)، الكتابة للأدمين فقط مع فحص القيم.
+    match /meals/{mealId} {
+      allow read: if true;
+      allow create, update: if isAdmin() && validMeal(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    // ───────────── weeklyMeals (الباقات الأسبوعية: طفل/كبير × 5 أيام) ─────────────
+    // كل وثيقة = يوم وحد فباقة وحدة. الـ id ديالها ثابت: <package>_<day> (مثلاً kids_mon)
+    // باش الأدمين يقدر يسجل مباشرة بلا ما يقلب على id قديم، وباش توفر حجم الوثيقة (كل يوم صورتو وحدو).
+
+    function validWeeklyMeal(slotId, d) {
+      return d.package in ['kids', 'adults']
+        && d.day in ['mon', 'tue', 'wed', 'thu', 'fri']
+        && slotId == d.package + '_' + d.day
+        && d.get('name', '') is string && d.get('name', '').size() <= 200
+        && d.get('image', '') is string && d.get('image', '').size() <= 500000;
+    }
+
+    match /weeklyMeals/{slotId} {
+      allow read: if true;
+      allow create, update: if isAdmin() && validWeeklyMeal(slotId, request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    // ───────────── config ─────────────
+
+    function validConfig(docId, d) {
+      return (docId == 'dailyMeal' && d.image is string && d.image.size() <= 500000)
+        || (docId == 'pointsRules' && validPointsRules(d))
+        || (docId == 'paymentMethods' && validPaymentMethods(d))
+        || (docId == 'loyaltyProgram' && validLoyaltyProgram(d))
+        || (docId == 'weeklyPackagePrices' && validWeeklyPackagePrices(d))
+        || (docId == 'privacyPolicy' && validPrivacyPolicyConfig(d));
+    }
+
+    // ── سياسة الخصوصية المنشورة (وثيقة واحدة config/privacyPolicy = النسخة الحالية للزبناء) ──
+    // الأدمين فقط يكتب فيها (من لوحة التحكم > سياسة الخصوصية)، والقراءة عامة (get فقط).
+    function validPrivacyPolicyConfig(d) {
+      return d.keys().hasOnly(['version', 'title', 'content', 'published', 'requireReaccept', 'publishedAt', 'updatedAt', 'updatedBy'])
+        && d.keys().hasAll(['version', 'title', 'content', 'published', 'updatedAt', 'updatedBy'])
+        && d.version is string && d.version.size() > 0 && d.version.size() <= 20
+        && d.title is string && d.title.size() <= 200
+        && d.content is string && d.content.size() <= 100000
+        && d.published is bool
+        && d.get('requireReaccept', false) is bool
+        && d.updatedAt == request.time
+        && d.updatedBy == request.auth.uid;
+    }
+
+    function validLoyaltyProgram(d) {
+      return d.get('enabled', true) is bool;
+    }
+
+    function validWeeklyPackagePrices(d) {
+      return d.get('kids', 0) is number && d.get('kids', 0) >= 0 && d.get('kids', 0) <= 100000
+        && d.get('adults', 0) is number && d.get('adults', 0) >= 0 && d.get('adults', 0) <= 100000;
+    }
+
+    function rulePoints(v) {
+      return v is number && v >= 0 && v <= 100000;
+    }
+
+    function validPointsRules(d) {
+      return rulePoints(d.firstOrderPoints)
+        && d.perDirham is number && d.perDirham > 0 && d.perDirham <= 100000
+        && rulePoints(d.reviewPoints)
+        && rulePoints(d.referralPoints)
+        && rulePoints(d.streak3Bonus)
+        && rulePoints(d.monthly5Bonus)
+        && rulePoints(d.monthly10Bonus);
+    }
+
+    function validPaymentMethod(m) {
+      return m == null
+        || (m is map
+            && m.get('enabled', true) is bool
+            && m.get('rib', '') is string && m.get('rib', '').size() <= 200
+            && m.get('holder', '') is string && m.get('holder', '').size() <= 200
+            && m.get('note', '') is string && m.get('note', '').size() <= 1000);
+    }
+
+    function validPaymentMethods(d) {
+      return d.keys().size() <= 30
+        && validPaymentMethod(d.get('card', null))
+        && validPaymentMethod(d.get('cod', null))
+        && validPaymentMethod(d.get('tpe', null))
+        && validPaymentMethod(d.get('cih', null))
+        && validPaymentMethod(d.get('fellah', null))
+        && validPaymentMethod(d.get('cashplus', null))
+        && validPaymentMethod(d.get('wafacash', null))
+        && validPaymentMethod(d.get('tijari', null))
+        && validPaymentMethod(d.get('baridbank', null));
+    }
+
+    // 6 وثائق فقط كيقراوها الزبناء (بلا تسجيل دخول): dailyMeal / paymentMethods / pointsRules / loyaltyProgram / weeklyPackagePrices / privacyPolicy.
+    // أي وثيقة أخرى فـ config: الأدمين فقط. الكتابة: الأدمين فقط مع فحص القيم.
+    match /config/{docId} {
+      allow get: if docId in ['dailyMeal', 'paymentMethods', 'pointsRules', 'loyaltyProgram', 'weeklyPackagePrices', 'privacyPolicy'];
+      allow read: if isAdmin();
+      allow create, update: if isAdmin() && validConfig(docId, request.resource.data);
+      allow delete: if false;
+    }
+
+    // ───────────── rewards (كتالوج المكافآت) ─────────────
+
+    function validReward(d) {
+      return d.name is string && d.name.size() > 0 && d.name.size() <= 200
+        && d.pointsCost is number && d.pointsCost > 0 && d.pointsCost <= 100000
+        && d.get('description', '') is string && d.get('description', '').size() <= 2000
+        && d.get('active', true) is bool;
+    }
+
+    function rewardDoc(id) {
+      return get(/databases/$(database)/documents/rewards/$(id));
+    }
+
+    // الزبون المسجل يشوف غير المكافآت المفعّلة (نفس الاستعلام ديال التطبيق: where active == true).
+    match /rewards/{rewardId} {
+      allow read: if isAdmin() || (isSignedIn() && resource.data.active == true);
+      allow create, update: if isAdmin() && validReward(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    // ───────────── orders (الطلبات) ─────────────
+
+    function validOrder(d) {
+      return d.keys().hasOnly(['uid', 'customer', 'schedule', 'plan', 'durationDays', 'paymentMethod',
+                               'paymentMethodLabel', 'deliveryLocation', 'mealType', 'lang', 'items', 'total', 'status', 'createdAt'])
+        && d.keys().hasAll(['uid', 'customer', 'schedule', 'plan', 'durationDays', 'paymentMethod',
+                            'paymentMethodLabel', 'deliveryLocation', 'mealType', 'lang', 'items', 'total', 'status', 'createdAt'])
+        && d.uid == request.auth.uid
+        && validOrderCustomer(d.customer)
+        && validOrderSchedule(d.schedule)
+        && d.plan in ['daily', 'weekly', 'monthly']
+        && d.durationDays is number && d.durationDays >= 1 && d.durationDays <= 3650
+        && d.paymentMethod in ['card', 'cod', 'tpe', 'cih', 'fellah', 'cashplus', 'wafacash', 'tijari', 'baridbank']
+        && d.paymentMethodLabel is string && d.paymentMethodLabel.size() <= 200
+        && d.deliveryLocation in ['home', 'work']
+        && d.mealType in ['lunch', 'dinner']
+        && d.lang in ['ar', 'fr']
+        && d.items is list && d.items.size() >= 1 && d.items.size() <= 100
+        && d.total is number && d.total > 0 && d.total <= 1000000
+        && d.status == 'قيد المراجعة'
+        && d.createdAt == request.time
+        && !isBannedUser(request.auth.uid);
+    }
+
+    // حساب محظور (status == 'banned' كيحطو الأدمين فقط) أو محذوف من الأدمين (deletedUsers) ما يقدرش يبعث طلبات جديدة
+    function isBannedUser(uid) {
+      return isDeletedUser(uid)
+        || (exists(/databases/$(database)/documents/users/$(uid))
+            && get(/databases/$(database)/documents/users/$(uid)).data.get('status', 'active') == 'banned');
+    }
+    function isDeletedUser(uid) {
+      return exists(/databases/$(database)/documents/deletedUsers/$(uid));
+    }
+    function isAdminUid(uid) {
+      return exists(/databases/$(database)/documents/admins/$(uid));
+    }
+
+    function validOrderCustomer(c) {
+      return c is map
+        && c.keys().hasOnly(['name', 'phone', 'address', 'mapLink', 'notes'])
+        && c.keys().hasAll(['name', 'phone', 'address', 'mapLink', 'notes'])
+        && c.name is string && c.name.size() >= 1 && c.name.size() <= 200
+        && c.phone is string && c.phone.matches('^(0[5-7][0-9]{8}|[+]212[5-7][0-9]{8})$')
+        && c.address is string && c.address.size() >= 1 && c.address.size() <= 1000
+        && c.mapLink is string
+        && (c.mapLink == '' || c.mapLink.matches('^https://www[.]google[.]com/maps[?]q=[-0-9.,eE+]+$'))
+        && c.notes is string && c.notes.size() <= 2000;
+    }
+
+    function validOrderSchedule(s) {
+      return s is map
+        && s.keys().hasOnly(['dates', 'dateFrom', 'dateTo', 'deliveryTime'])
+        && s.keys().hasAll(['dates', 'dateFrom', 'dateTo', 'deliveryTime'])
+        && s.dates is list && s.dates.size() >= 1 && s.dates.size() <= 3650
+        && s.dateFrom is string && s.dateFrom.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+        && s.dateTo is string && s.dateTo.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+        && s.dateTo >= s.dateFrom
+        && s.deliveryTime is string && s.deliveryTime.matches('^[0-9]{2}:[0-9]{2}(:[0-9]{2})?$');
+    }
+
+    // الزبون يقدر يقيّم طلبو مرة وحدة: كيتبدلو غير reviewed / rating / reviewComment
+    function ownerCanReview() {
+      return isSignedIn()
+        && resource.data.uid == request.auth.uid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reviewed', 'rating', 'reviewComment'])
+        && request.resource.data.reviewed == true
+        && resource.data.get('reviewed', false) != true
+        && request.resource.data.rating is number
+        && request.resource.data.rating >= 1 && request.resource.data.rating <= 5
+        && request.resource.data.reviewComment is string
+        && request.resource.data.reviewComment.size() <= 1000;
+    }
+
+    // • إنشاء: زبون مسجل الدخول فقط، والطلب خاصو يكون باسمو (uid) وبنفس الحقول لي كيبعث التطبيق.
+    //   الحالة الأولية ثابتة ("قيد المراجعة") والتاريخ من السيرفر، فالزبون ما يقدرش يبعث طلب "مؤكد/مدفوع".
+    // إلغاء الطلب من طرف الزبون — الشروط كاملة فالسيرفر (ماشي غير فالواجهة):
+    //  1) الطلب ديالو، 2) الحالة لسا قبل التحضير ('قيد المراجعة' أو 'تم قبول الطلب')،
+    //  3) ما فاتت 30 دقيقة على createdAt (طابع الوقت ديال السيرفر، ماشي ساعة الهاتف):
+    //     request.time هو وقت السيرفر، و createdAt ما يقدرش الزبون يبدلو (affectedKeys محدودة)،
+    //  4) كيتبدلو غير status/cancelledAt/cancelledBy/cancellationReason بقيم ثابتة.
+    function ownerCanCancel() {
+      return isSignedIn()
+        && resource.data.uid == request.auth.uid
+        && resource.data.get('status', 'قيد المراجعة') in ['قيد المراجعة', 'تم قبول الطلب']
+        && resource.data.createdAt is timestamp
+        && request.time < resource.data.createdAt + duration.value(30, 'm')
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'cancelledAt', 'cancelledBy', 'cancellationReason'])
+        && request.resource.data.status == 'ملغى من طرف الزبون'
+        && request.resource.data.cancelledAt == request.time
+        && request.resource.data.cancelledBy == 'customer'
+        && request.resource.data.cancellationReason is string
+        && request.resource.data.cancellationReason.size() <= 300;
+    }
+
+    // • قراءة: الأدمين الكل، والزبون غير طلباتو (where uid == uid).
+    // • تعديل: الأدمين، أو الزبون على طلبو هو فقط: حقول التقييم (مرة وحدة) أو الإلغاء (بالشروط فوق).
+    // • حذف: الأدمين فقط.
+    match /orders/{orderId} {
+      allow read: if isAdmin() || (isSignedIn() && resource.data.uid == request.auth.uid);
+      allow create: if isSignedIn() && validOrder(request.resource.data);
+      allow update: if isAdmin() || ownerCanReview() || ownerCanCancel();
+      allow delete: if isAdmin();
+    }
+
+    // ───────────── users (الملفات الشخصية) ─────────────
+
+    function userKeys() {
+      return ['name', 'address', 'phone', 'gender', 'avatar', 'referralCode', 'referredByUid',
+              'referralBonusGiven', 'orderCount', 'ordersThisMonth', 'lastOrderMonthKey',
+              'orderMilestone3Given', 'createdAt',
+              'email', 'privacyPolicyAccepted', 'privacyPolicyVersion', 'privacyPolicyAcceptedAt', 'lastLoginAt'];
+      // ملاحظة: 'status' (active/banned) ماشي هنا عمداً — كيتبدل غير من الـ Worker (Admin SDK) بعد التحقق من الأدمين.
+    }
+
+    function validUserFields(d) {
+      return d.get('name', '') is string && d.get('name', '').size() <= 200
+        && d.get('address', '') is string && d.get('address', '').size() <= 1000
+        && d.get('phone', '') is string && d.get('phone', '').size() <= 20
+        && d.get('gender', 'male') in ['male', 'female']
+        && d.get('avatar', '') is string && d.get('avatar', '').size() <= 16
+        && d.get('referralCode', '') is string && d.get('referralCode', '').size() <= 12
+        && (d.get('referredByUid', null) == null
+            || (d.get('referredByUid', null) is string
+                && d.get('referredByUid', null).size() <= 128
+                && d.get('referredByUid', null) != request.auth.uid))
+        && d.get('referralBonusGiven', false) is bool
+        && d.get('orderCount', 0) is number && d.get('orderCount', 0) >= 0 && d.get('orderCount', 0) <= 1000000
+        && d.get('ordersThisMonth', 0) is number && d.get('ordersThisMonth', 0) >= 0 && d.get('ordersThisMonth', 0) <= 1000000
+        && d.get('lastOrderMonthKey', '') is string && d.get('lastOrderMonthKey', '').size() <= 7
+        && d.get('orderMilestone3Given', false) is bool
+        && d.get('email', '') is string && d.get('email', '').size() <= 254
+        && d.get('privacyPolicyAccepted', false) is bool
+        && d.get('privacyPolicyVersion', '') is string && d.get('privacyPolicyVersion', '').size() <= 20
+        && d.get('privacyPolicyAcceptedAt', request.time) is timestamp
+        && d.get('lastLoginAt', request.time) is timestamp;
+    }
+
+    // سياسة الخصوصية: النسخة لي كيجب الزبون يوافق عليها = المنشورة فـ config/privacyPolicy، وإلا النسخة الافتراضية
+    function expectedPolicyVersion() {
+      return (exists(/databases/$(database)/documents/config/privacyPolicy)
+              && get(/databases/$(database)/documents/config/privacyPolicy).data.get('published', false) == true)
+        ? get(/databases/$(database)/documents/config/privacyPolicy).data.version
+        : '1.0-default';
+    }
+
+    function policyAcceptOk(d) {
+      return d.get('privacyPolicyAccepted', false) == true
+        && d.get('privacyPolicyVersion', '') == expectedPolicyVersion()
+        && d.get('privacyPolicyAcceptedAt', null) == request.time;
+    }
+
+    // إنشاء حساب بدون موافقة على السياسة = مرفوض من السيرفر (حتى لو تلاعب أحد بالواجهة)
+    function validUserCreate(d) {
+      return d.keys().hasOnly(userKeys())
+        && validUserFields(d)
+        && d.get('createdAt', request.time) == request.time
+        && policyAcceptOk(d)
+        && d.get('lastLoginAt', request.time) == request.time
+        && !isDeletedUser(request.auth.uid);
+    }
+
+    // الموافقة ما كتتبدلش إلا بموافقة جديدة صحيحة (على النسخة الحالية)، و lastLoginAt إما كما هو أو وقت السيرفر
+    function policyUnchanged() {
+      return request.resource.data.get('privacyPolicyVersion', '') == resource.data.get('privacyPolicyVersion', '')
+        && request.resource.data.get('privacyPolicyAccepted', false) == resource.data.get('privacyPolicyAccepted', false)
+        && request.resource.data.get('privacyPolicyAcceptedAt', null) == resource.data.get('privacyPolicyAcceptedAt', null);
+    }
+
+    function loginTimeOk() {
+      return request.resource.data.get('lastLoginAt', null) == resource.data.get('lastLoginAt', null)
+        || request.resource.data.get('lastLoginAt', null) == request.time;
+    }
+
+    function validUserUpdate() {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(userKeys())
+        && validUserFields(request.resource.data)
+        && unchangedIfSet('referralCode')
+        && unchangedIfSet('referredByUid')
+        && unchangedIfSet('createdAt')
+        && unchangedIfSet('email')
+        && (policyUnchanged() || policyAcceptOk(request.resource.data))
+        && loginTimeOk();
+    }
+
+    function unchangedIfSet(k) {
+      return !(k in resource.data)
+        || (k in request.resource.data && request.resource.data[k] == resource.data[k]);
+    }
+
+    // كل زبون يقرا/يكتب/يحذف وثيقتو هو فقط؛ الأدمين قراءة فقط (بحث برقم الهاتف + أكثر العملاء نشاطاً).
+    // referralCode / referredByUid / createdAt كيتحطو مرة وحدة وما كيتبدلوش من بعد.
+    match /users/{uid} {
+      allow get: if isOwner(uid) || isAdmin();
+      allow list: if isAdmin();
+      allow create: if isOwner(uid) && validUserCreate(request.resource.data);
+      // الأدمين يقدر يبدل غير حالة الحساب (حظر/إلغاء حظر)، وماشي حسابو ولا حساب أدمين آخر
+      allow update: if (isOwner(uid) && validUserUpdate())
+        || (isAdmin() && uid != request.auth.uid && !isAdminUid(uid)
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'statusUpdatedAt', 'statusUpdatedBy'])
+            && request.resource.data.status in ['active', 'banned']
+            && request.resource.data.statusUpdatedAt == request.time
+            && request.resource.data.statusUpdatedBy == request.auth.uid);
+      allow delete: if isOwner(uid) || (isAdmin() && uid != request.auth.uid && !isAdminUid(uid));
+    }
+
+    // ───────────── referralCodes (كود الدعوة → صاحبو) ─────────────
+
+    // بديل آمن للاستعلام القديم على users: الزبون المسجل يقدر يجيب كود واحد بالاسم (get)،
+    // ما كاين حتى سرد/بحث. الكود = أول 6 حروف (كبار) من uid صاحبو، وكيتسجل مرة وحدة.
+    match /referralCodes/{code} {
+      allow get: if isSignedIn();
+      allow create: if isSignedIn()
+        && code.matches('^[A-Z0-9]{6}$')
+        && request.auth.uid.upper().matches('^' + code + '.*')
+        && request.resource.data.keys().hasOnly(['uid'])
+        && request.resource.data.uid == request.auth.uid;
+      allow delete: if isSignedIn() && (resource.data.uid == request.auth.uid || (isAdmin() && !isAdminUid(resource.data.uid)));
+      allow list, update: if false;
+    }
+
+    // ───────────── members (بطاقة العضوية) ─────────────
+
+    function memberKeys() {
+      return ['uid', 'name', 'phone', 'gender', 'avatar', 'startDate', 'endDate', 'totalDays',
+              'orderId', 'plan', 'joinDate', 'updatedAt'];
+    }
+
+    function validMemberFields(d) {
+      return d.uid == request.auth.uid
+        && d.name is string && d.name.size() <= 200
+        && d.phone is string && d.phone.size() <= 20
+        && d.gender in ['male', 'female']
+        && d.avatar is string && d.avatar.size() <= 16
+        && d.startDate is string && d.startDate.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+        && d.endDate is string && d.endDate.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+        && d.totalDays is number && d.totalDays >= 1 && d.totalDays <= 100000
+        && d.orderId is string && d.orderId.size() <= 100
+        && (d.plan == null || d.plan in ['daily', 'weekly', 'monthly'])
+        && d.joinDate is string && d.joinDate.size() <= 40
+        && d.updatedAt == request.time;
+    }
+
+    // معرّف الوثيقة = uid ديال الزبون. هو وحدو يقدر يكتب/يمسح؛ الأدمين قراءة فقط.
+    match /members/{memberId} {
+      allow get: if isOwner(memberId) || isAdmin();
+      allow list: if isAdmin();
+      allow create: if isOwner(memberId)
+        && request.resource.data.keys().hasOnly(memberKeys())
+        && request.resource.data.keys().hasAll(memberKeys())
+        && validMemberFields(request.resource.data);
+      allow update: if isOwner(memberId)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(memberKeys())
+        && validMemberFields(request.resource.data);
+      allow delete: if isOwner(memberId) || (isAdmin() && memberId != request.auth.uid && !isAdminUid(memberId));
+    }
+
+    // ───────────── pointsLog (سجل النقاط) ─────────────
+
+    function validPointsEntry(d) {
+      return d.keys().hasOnly(['uid', 'points', 'reason', 'orderId', 'createdAt'])
+        && d.keys().hasAll(['uid', 'points', 'reason', 'orderId', 'createdAt'])
+        && d.uid is string
+        && d.points is number
+        && d.reason is string && d.reason.size() <= 500
+        && (d.orderId == null || (d.orderId is string && d.orderId.size() <= 100))
+        && d.createdAt == request.time;
+    }
+
+    function validReferralAward(logId, d) {
+      return logId == 'ref_' + request.auth.uid
+        && d.uid != request.auth.uid
+        && d.points > 0 && d.points <= 10000
+        && d.uid == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('referredByUid', null);
+    }
+
+    // دفتر عمليات: كل عملية وثيقة ما كتتعدلش ولا كتتمسحش أبداً.
+    // • الزبون يكتب غير عمليات باسمو هو (كسب/استعمال) بحدود معقولة.
+    // • الاستثناء الوحيد: مكافأة الدعوة للـ referrer، كتتسجل مرة وحدة لكل مدعو (id = ref_<uid المدعو>)
+    //   وفقط للشخص لي المدعو صرّح بيه فبروفايلو.
+    // • الأدمين: تعديل يدوي لأي زبون.
+    match /pointsLog/{logId} {
+      allow read: if isAdmin() || (isSignedIn() && resource.data.uid == request.auth.uid);
+      allow create: if isSignedIn() && validPointsEntry(request.resource.data) && (
+        isAdmin()
+        || (request.resource.data.uid == request.auth.uid
+            && request.resource.data.points != 0
+            && request.resource.data.points >= -100000
+            && request.resource.data.points <= 100000)
+        || validReferralAward(logId, request.resource.data)
+      );
+      allow update, delete: if false;
+    }
+
+    // ───────────── redemptions (استبدال المكافآت) ─────────────
+
+    function validRedemption(id, d) {
+      return d.keys().hasOnly(['uid', 'rewardId', 'rewardName', 'pointsCost', 'code', 'status', 'createdAt'])
+        && d.keys().hasAll(['uid', 'rewardId', 'rewardName', 'pointsCost', 'code', 'status', 'createdAt'])
+        && d.uid == request.auth.uid
+        && d.status == 'pending'
+        && d.code == id
+        && d.rewardId is string && d.rewardId.size() > 0 && d.rewardId.size() <= 100
+        && d.rewardName is string && d.rewardName.size() <= 200
+        && d.pointsCost is number && d.pointsCost > 0 && d.pointsCost <= 100000
+        && d.createdAt == request.time
+        && rewardDoc(d.rewardId).data.active == true
+        && rewardDoc(d.rewardId).data.pointsCost == d.pointsCost
+        && rewardDoc(d.rewardId).data.name == d.rewardName
+        && getAfter(/databases/$(database)/documents/pointsLog/$('redeem_' + id)).data.uid == request.auth.uid
+        && getAfter(/databases/$(database)/documents/pointsLog/$('redeem_' + id)).data.points == -d.pointsCost;
+    }
+
+    // الزبون كيصاوب طلب استبدال لراسو، وخاصو يتسجل فنفس العملية (batch) خصم النقاط
+    // pointsLog/redeem_<code> بنفس ثمن المكافأة فالكتالوج. الأدمين وحدو يقرا ويأكد.
+    match /redemptions/{redemptionId} {
+      allow read: if isAdmin();
+      allow create: if isSignedIn() && validRedemption(redemptionId, request.resource.data);
+      allow update, delete: if isAdmin();
+    }
+
+    // ───────────── messages (الدردشة مع الدعم) ─────────────
+
+    function validCustomerMessage(d) {
+      return d.keys().hasOnly(['threadId', 'senderUid', 'senderRole', 'text', 'imageData', 'audioData',
+                               'readByCustomer', 'readByAdmin', 'createdAt'])
+        && d.keys().hasAll(['threadId', 'senderUid', 'senderRole', 'text',
+                            'readByCustomer', 'readByAdmin', 'createdAt'])
+        && d.threadId == request.auth.uid
+        && d.senderUid == request.auth.uid
+        && d.senderRole == 'customer'
+        && d.text is string && d.text.size() <= 2000
+        && (!('imageData' in d) || (d.imageData is string && d.imageData.size() <= 1000000))
+        && (!('audioData' in d) || (d.audioData is string && d.audioData.size() <= 1000000))
+        && d.readByCustomer == true
+        && d.readByAdmin == false
+        && d.createdAt == request.time;
+    }
+
+    function validAdminMessage(d) {
+      return d.keys().hasOnly(['threadId', 'senderUid', 'senderRole', 'text', 'audioData',
+                               'readByCustomer', 'readByAdmin', 'createdAt'])
+        && d.keys().hasAll(['threadId', 'senderUid', 'senderRole', 'text',
+                            'readByCustomer', 'readByAdmin', 'createdAt'])
+        && d.threadId is string && d.threadId.size() > 0 && d.threadId.size() <= 128
+        && d.senderUid == request.auth.uid
+        && d.senderRole == 'admin'
+        && d.text is string && d.text.size() <= 2000
+        && (!('audioData' in d) || (d.audioData is string && d.audioData.size() <= 1000000))
+        && d.readByCustomer == false
+        && d.readByAdmin == true
+        && d.createdAt == request.time;
+    }
+
+    function customerMarksRead() {
+      return isSignedIn()
+        && resource.data.threadId == request.auth.uid
+        && resource.data.senderRole == 'admin'
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['readByCustomer'])
+        && request.resource.data.readByCustomer == true;
+    }
+
+    // threadId = uid ديال الزبون. الزبون يبعث ويقرا غير فـ thread ديالو.
+    // تعديل: الزبون يقدر غير يعلّم رسائل الأدمين "مقروءة"، والأدمين غير حالات القراءة.
+    match /messages/{msgId} {
+      allow read: if isAdmin() || (isSignedIn() && resource.data.threadId == request.auth.uid);
+      allow create: if isSignedIn() && (
+        validCustomerMessage(request.resource.data)
+        || (isAdmin() && validAdminMessage(request.resource.data))
+      );
+      allow update: if (isAdmin()
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['readByAdmin', 'readByCustomer']))
+        || customerMarksRead();
+      allow delete: if isAdmin();
+    }
+
+    // ───────────── privacyPolicyVersions (أرشيف نسخ سياسة الخصوصية + المسودات) ─────────────
+    // الأدمين فقط يقرا ويكتب. الزبناء كيقراو غير النسخة المنشورة من config/privacyPolicy.
+    function validPolicyVersion(d) {
+      return d.keys().hasOnly(['version', 'title', 'content', 'status', 'createdAt', 'updatedAt', 'updatedBy'])
+        && d.keys().hasAll(['version', 'title', 'content', 'status', 'updatedAt', 'updatedBy'])
+        && d.version is string && d.version.size() > 0 && d.version.size() <= 20
+        && d.title is string && d.title.size() <= 200
+        && d.content is string && d.content.size() <= 100000
+        && d.status in ['draft', 'published', 'archived']
+        && d.updatedAt == request.time
+        && d.updatedBy == request.auth.uid;
+    }
+    match /privacyPolicyVersions/{versionId} {
+      allow read: if isAdmin();
+      allow create, update: if isAdmin() && validPolicyVersion(request.resource.data) && versionId == request.resource.data.version;
+      allow delete: if isAdmin() && resource.data.status == 'draft';
+    }
+
+    // ───────────── deletedUsers (شاهد حذف الحساب من طرف الأدمين) ─────────────
+    // بدون Worker/Admin SDK: الأدمين يمسح بيانات Firestore ويكتب هاد الوثيقة. عند أول دخول للزبون المحذوف،
+    // التطبيق كيلقاها، كيمسح حساب الدخول (Auth) ديالو بنفسو، وكيخرجو. الزبون يقرا وثيقتو هو فقط.
+    // كتمنع كذلك إنشاء ملف شخصي/طلبات بهاد الحساب (انظر validUserCreate و isBannedUser).
+    function validDeletedUser(d) {
+      return d.keys().hasOnly(['phone', 'gender', 'name', 'email', 'createdAt', 'deletedAt', 'deletedBy'])
+        && d.keys().hasAll(['deletedAt', 'deletedBy'])
+        && d.deletedAt == request.time
+        && d.deletedBy == request.auth.uid
+        && d.get('phone', '') is string && d.get('name', '') is string
+        && d.get('gender', '') is string && d.get('email', '') is string;
+    }
+    match /deletedUsers/{uid} {
+      allow get: if isOwner(uid) || isAdmin();
+      allow list: if isAdmin();
+      allow create: if isAdmin() && uid != request.auth.uid && !isAdminUid(uid) && validDeletedUser(request.resource.data);
+      allow update, delete: if false;
+    }
+
+    // أي مجموعة أخرى (بما فيها أي شيء غير مذكور فوق): ممنوع — الافتراضي فـ Firestore.
+  }
+}
