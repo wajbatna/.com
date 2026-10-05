@@ -127,6 +127,8 @@ function renderWeeklyPackages() {
 let lang = getLang();
 let meals = [];
 let dailyMealImage = "";
+let dailyMealTitle = "";
+let dailyMealAuto = true; // تلقائي من باقة الكبار (الإثنين→الجمعة)؛ يقدر المشرف يوقفو
 let cart = {};
 let category = "all",
   plan = "weekly";
@@ -389,12 +391,42 @@ function bump(el) {
 }
 
 /* ---------- بانر وجبة اليوم (فوق الفئات: الكل/الفطور/الغداء/العشاء) ---------- */
+// وجبة اليوم: من الإثنين للجمعة كتتاخد تلقائياً (الصورة + اسم الطبق) من باقة الكبار ديال نفس النهار.
+// السبت والأحد (أو إلا ما كانش طبق محدد لهاد النهار، أو أوقف المشرف الوضع التلقائي) كتتستعمل الصورة/العنوان لي دخلهم المشرف يدوياً.
+// النهار كيتحسب بتوقيت المغرب (Africa/Casablanca) باش ما يتأثرش بساعة/منطقة هاتف الزبون.
+function moroccoDayKey() {
+  try {
+    return new Date().toLocaleDateString("en-US", { weekday: "short", timeZone: "Africa/Casablanca" }).slice(0, 3).toLowerCase();
+  } catch (_) {
+    return ["sun", "mon", "tue", "wed", "thu", "fri", "sat"][new Date().getDay()];
+  }
+}
+function currentDailyMeal() {
+  const key = moroccoDayKey();
+  if (dailyMealAuto && ["mon", "tue", "wed", "thu", "fri"].includes(key)) {
+    const slot = weeklyPackages.adults.days[key];
+    if (slot && slot.image) return { image: slot.image, title: slot.name || "" };
+  }
+  return { image: dailyMealImage, title: dailyMealTitle };
+}
+let lastDailyKey = moroccoDayKey();
+setInterval(() => {
+  const k = moroccoDayKey();
+  if (k !== lastDailyKey) {
+    lastDailyKey = k;
+    renderDailyMealBanner(); // تغيّر النهار (نص الليل) والصفحة مفتوحة
+  }
+}, 60000);
 function renderDailyMealBanner() {
   const banner = document.getElementById("dailyMealBanner");
   const img = document.getElementById("dailyMealImg");
+  const titleEl = document.getElementById("dailyMealTitle");
   if (!banner || !img) return;
-  if (dailyMealImage) {
-    img.src = dailyMealImage;
+  const m = currentDailyMeal();
+  if (m.image) {
+    if (img.getAttribute("src") !== m.image) img.src = m.image;
+    img.alt = m.title || t(lang).dailyMealBadge;
+    if (titleEl) titleEl.textContent = m.title || "";
     banner.classList.add("show");
   } else {
     banner.classList.remove("show");
@@ -3077,7 +3109,10 @@ subscribeMeals();
 onSnapshot(
   doc(db, "config", "dailyMeal"),
   (snap) => {
-    dailyMealImage = snap.exists() ? snap.data().image || "" : "";
+    const d = snap.exists() ? snap.data() : {};
+    dailyMealImage = d.image || "";
+    dailyMealTitle = d.title || "";
+    dailyMealAuto = d.auto !== false;
     renderDailyMealBanner();
   },
   () => {}
@@ -3120,6 +3155,7 @@ onSnapshot(
       if (weeklyPackages[data.package]) weeklyPackages[data.package].days[data.day] = data;
     });
     renderWeeklyPackages();
+    renderDailyMealBanner(); // وجبة اليوم كتتبع باقة الكبار
   },
   () => {}
 );

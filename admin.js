@@ -342,15 +342,25 @@ async function switchTab(tab) {
 async function renderMealsTab() {
   const a = document.getElementById("adminContent");
   let dailyMealImage = "";
+  let dailyMealTitle = "";
+  let dailyMealAuto = true;
   try {
     const snap = await getDoc(doc(db, "config", "dailyMeal"));
-    if (snap.exists()) dailyMealImage = snap.data().image || "";
+    if (snap.exists()) {
+      dailyMealImage = snap.data().image || "";
+      dailyMealTitle = snap.data().title || "";
+      dailyMealAuto = snap.data().auto !== false;
+    }
   } catch (e) {
     /* تجاهل */
   }
   a.innerHTML = `<div class="admin-card"><h2 style="color:#064e3b;margin-top:0">${ico("dejeuner")}صورة وجبة اليوم</h2>
-   <p style="color:#a8a29e;font-size:12px;margin-top:-8px">هاد الصورة كتبان فوق فئات (الكل / الفطور / الغداء / العشاء) فالصفحة الرئيسية. خليها فارغة باش تخفيها.</p>
-   <form id="dailyMealForm"><label>رابط الصورة</label><input id="dailyMealImageInput" placeholder="https://..." value="${escapeAttr(dailyMealImage)}">
+   <p style="color:#a8a29e;font-size:12px;margin-top:-8px">كتبان فوق فئات (الكل / الفطور / الغداء / العشاء) فالصفحة الرئيسية. خليها فارغة باش تخفيها.</p>
+   <form id="dailyMealForm">
+   <label class="privacy-check-admin" style="margin-bottom:10px"><input type="checkbox" id="dailyMealAutoInput" ${dailyMealAuto ? "checked" : ""}> <span>تلقائي: من الإثنين إلى الجمعة تُؤخذ الصورة واسم الطبق من «باقة الكبار» لنفس اليوم (بتوقيت المغرب)</span></label>
+   <div style="font-size:12px;color:#78716c;margin-bottom:8px">الحقلان التاليان يُستعملان يوم <b>السبت والأحد</b>، وكذلك إذا لم يكن في باقة الكبار طبق (بصورة) لذلك اليوم، أو إذا أوقفت الوضع التلقائي.</div>
+   <label>رابط الصورة (السبت/الاحتياطي)</label><input id="dailyMealImageInput" placeholder="https://..." value="${escapeAttr(dailyMealImage)}">
+   <label>العنوان (اختياري)</label><input id="dailyMealTitleInput" maxlength="150" placeholder="مثال: كسكس بالخضر" value="${escapeAttr(dailyMealTitle)}">
    <button class="add" type="submit" style="width:100%;margin-top:12px;padding:12px">✓ حفظ الصورة</button></form></div>
   <div class="admin-card"><h2 style="color:#064e3b;margin-top:0">إضافة طبق جديد</h2>
    <form id="addMealForm"><label>اسم الطبق</label><input id="newName" required><label>الفئة</label>
@@ -380,7 +390,9 @@ async function saveDailyMealImage(e) {
   btn.disabled = true;
   try {
     const url = document.getElementById("dailyMealImageInput").value.trim();
-    await setDoc(doc(db, "config", "dailyMeal"), { image: url, updatedAt: serverTimestamp() }, { merge: true });
+    const title = document.getElementById("dailyMealTitleInput").value.trim().slice(0, 150);
+    const auto = document.getElementById("dailyMealAutoInput").checked;
+    await setDoc(doc(db, "config", "dailyMeal"), { image: url, title, auto, updatedAt: serverTimestamp() }, { merge: true });
     btn.textContent = "✓ تم الحفظ";
     setTimeout(() => {
       btn.textContent = original;

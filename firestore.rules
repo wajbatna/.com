@@ -75,7 +75,9 @@ service cloud.firestore {
     // ───────────── config ─────────────
 
     function validConfig(docId, d) {
-      return (docId == 'dailyMeal' && d.image is string && d.image.size() <= 500000)
+      return (docId == 'dailyMeal' && d.image is string && d.image.size() <= 500000
+          && d.get('title', '') is string && d.get('title', '').size() <= 150
+          && d.get('auto', true) is bool)
         || (docId == 'pointsRules' && validPointsRules(d))
         || (docId == 'paymentMethods' && validPaymentMethods(d))
         || (docId == 'loyaltyProgram' && validLoyaltyProgram(d))

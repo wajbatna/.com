@@ -94,6 +94,8 @@
     .daily-meal-badge{position:absolute;top:14px;inset-inline-start:14px;z-index:2;background:var(--accent);color:var(--primary);padding:7px 16px;border-radius:999px;font-size:14px;font-weight:900;max-width:calc(100% - 28px);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;box-shadow:0 4px 12px #0003}
     .daily-meal-cta{position:absolute;bottom:14px;inset-inline-end:14px;z-index:2;border:0;background:#fff;color:var(--primary);border-radius:999px;min-height:var(--tap);padding:0 22px;font-weight:900;font-size:15px;box-shadow:0 6px 16px #0004}
     .daily-meal-cta:hover{background:var(--accent)}
+    .daily-meal-title{position:absolute;bottom:20px;inset-inline-start:16px;z-index:2;color:#fff;font-weight:900;font-size:19px;line-height:1.4;max-width:calc(100% - 190px);text-shadow:0 2px 8px #0008;overflow-wrap:anywhere}
+    .daily-meal-title:empty{display:none}
     .weekly-packages{display:flex;flex-direction:column;gap:16px;margin:0 0 22px}
     .weekly-pack{border-radius:24px;overflow:hidden;box-shadow:0 10px 30px #00000014;background:linear-gradient(135deg,var(--primary),var(--primary-dark));color:#fff;padding:18px}
     .weekly-pack-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:14px;flex-wrap:wrap}
@@ -483,6 +485,7 @@
   <div class="daily-meal" id="dailyMealBanner">
     <span class="daily-meal-badge"><img src="img/icons/dejeuner.webp" alt="" width="20" height="20" style="width:1.1em;height:1.1em;vertical-align:-0.2em;margin-inline-end:.25em;object-fit:contain"><span id="dailyMealBadge">وجبة اليوم</span></span>
     <img id="dailyMealImg" src="" alt="وجبة اليوم" width="1200" height="675" decoding="async">
+    <div class="daily-meal-title" id="dailyMealTitle"></div>
     <button type="button" class="daily-meal-cta" onclick="scrollToMenu()" data-i18n="dailyMealCta">اطلب الآن</button>
   </div>
   <div class="weekly-packages" id="weeklyPackagesSection"></div>
