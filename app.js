@@ -1,4 +1,5 @@
 // app.js — منطق الواجهة الأمامية (الزبون) — ثنائي اللغة + حساب + بطاقة العضوية
+import "./pw-eye.js";
 import { db, auth } from "./firebase.js";
 import { getLang, setLang, t } from "./i18n.js";
 import {
@@ -2534,7 +2535,7 @@ function renderAccountProfile() {
    <div class="profile-row"><span>${s.profileNameLabel}</span><b>${userProfile?.name ? escapeHtml(userProfile.name) : s.profileNameNone}</b></div>
    <div class="profile-row"><span>${s.profilePhoneLabel}</span><b>${escapeHtml(phone)}</b></div>
    <div class="profile-row"><span>${s.profileGenderLabel}</span><b>${genderLabel}</b></div>
-   <button class="link-btn" style="width:100%;margin-top:12px" onclick="renderEditProfile()">✏️ ${s.editProfileBtn}</button>
+   <button class="link-btn" style="width:100%;margin-top:12px" onclick="renderEditProfile()">${ico("edit")}${s.editProfileBtn}</button>
    ${
      membershipData
        ? `<button class="checkout" style="width:100%;margin-top:18px" onclick="openMembership()">${ico("card")}${s.goToMembership}</button>`
@@ -3137,7 +3138,9 @@ onSnapshot(
 
 
 /* ---------- روابطنا (مواقعنا): كتبان فالـ footer فقط الروابط المفعّلة من لوحة المشرف (collection siteLinks) ---------- */
-const LINK_ICONS = { website: "🌐", location: "📍", facebook: "📘", instagram: "📸", tiktok: "🎵", whatsapp: "💬", youtube: "▶️", phone: "📞", email: "✉️", other: "🔗" };
+const LINK_TYPES = ["website", "location", "facebook", "instagram", "tiktok", "whatsapp", "youtube", "phone", "email", "other"];
+const linkIcon = (type) =>
+  `<img src="img/icons/link-${LINK_TYPES.includes(type) ? type : "other"}.webp" alt="" width="26" height="26" style="width:26px;height:26px;object-fit:contain;vertical-align:middle;margin-inline-end:8px;border-radius:50%">`;
 function safeLinkUrl(u) {
   const v = String(u || "").trim();
   return /^(https?:\/\/|tel:|mailto:)/i.test(v) ? v : null; // ما نقبلو javascript: وغيرها أبداً
@@ -3155,7 +3158,7 @@ onSnapshot(
     list.innerHTML = items
       .map((l) => {
         const external = /^https?:/i.test(l.url);
-        return `<li><a href="${escapeHtml(safeLinkUrl(l.url))}" ${external ? 'target="_blank" rel="noopener noreferrer"' : ""}>${LINK_ICONS[l.type] || LINK_ICONS.other}&nbsp;${escapeHtml(l.title || "")}</a></li>`;
+        return `<li><a href="${escapeHtml(safeLinkUrl(l.url))}" ${external ? 'target="_blank" rel="noopener noreferrer"' : ""}>${linkIcon(l.type)}${escapeHtml(l.title || "")}</a></li>`;
       })
       .join("");
     col.style.display = items.length ? "" : "none";

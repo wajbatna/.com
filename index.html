@@ -313,6 +313,11 @@
     label{display:block;font-size:13px;font-weight:700;margin:12px 0 6px;color:#44403c}
     input,textarea,select{width:100%;border:1.5px solid var(--border);border-radius:14px;padding:12px 14px;min-height:var(--tap);outline:none;background:#fff;font-size:16px;transition:border-color .2s ease,box-shadow .2s ease}
     input:focus-visible,textarea:focus-visible,select:focus-visible{outline:none}
+    .pw-wrap{position:relative;display:block;width:100%}
+    .pw-wrap input{padding-inline-end:52px}
+    .pw-eye{position:absolute;inset-inline-end:8px;top:50%;transform:translateY(-50%);border:0;background:none;padding:2px;width:36px;height:36px;min-height:0;display:flex;align-items:center;justify-content:center;cursor:pointer;border-radius:50%}
+    .pw-eye img{width:28px;height:28px;object-fit:contain;pointer-events:none}
+    .pw-eye:active{transform:translateY(-50%) scale(.92)}
     input:focus,textarea:focus,select:focus{border-color:var(--primary-light);box-shadow:0 0 0 3px #04785718}
 
     .location-btn{white-space:nowrap;border:0;background:var(--primary);color:#fff;border-radius:14px;padding:0 14px;font-weight:700;font-size:13px;height:48px;flex-shrink:0;display:flex;align-items:center;gap:6px}

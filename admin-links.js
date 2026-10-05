@@ -19,18 +19,19 @@ export function initAdminLinks(c) {
 }
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" }[c]));
 const TYPES = [
-  ["website", "🌐 موقع إلكتروني"],
-  ["location", "📍 الموقع على الخريطة"],
-  ["facebook", "📘 فيسبوك"],
-  ["instagram", "📸 إنستغرام"],
-  ["tiktok", "🎵 تيك توك"],
-  ["whatsapp", "💬 واتساب"],
-  ["youtube", "▶️ يوتيوب"],
-  ["phone", "📞 هاتف (tel:)"],
-  ["email", "✉️ بريد (mailto:)"],
-  ["other", "🔗 أخرى"],
+  ["website", "موقع إلكتروني"],
+  ["location", "الموقع على الخريطة"],
+  ["facebook", "فيسبوك"],
+  ["instagram", "إنستغرام"],
+  ["tiktok", "تيك توك"],
+  ["whatsapp", "واتساب"],
+  ["youtube", "يوتيوب"],
+  ["phone", "هاتف (tel:)"],
+  ["email", "بريد (mailto:)"],
+  ["other", "أخرى"],
 ];
-const ICON = Object.fromEntries(TYPES.map(([k, v]) => [k, v.split(" ")[0]]));
+const typeImg = (t, px = 28) =>
+  `<img src="img/icons/link-${TYPES.some((x) => x[0] === t) ? t : "other"}.webp" alt="" width="${px}" height="${px}" style="width:${px}px;height:${px}px;object-fit:contain;border-radius:50%;vertical-align:middle">`;
 const URL_RE = /^(https?:\/\/|tel:|mailto:).+/i;
 
 export async function renderLinksTab(el) {
@@ -47,10 +48,10 @@ export async function renderLinksTab(el) {
   const nextOrder = links.length ? Math.max(...links.map((l) => l.order || 0)) + 1 : 1;
   el.innerHTML = `
   <div class="admin-card">
-    <h3 style="margin:0 0 4px;color:#064e3b">🔗 روابطنا / مواقعنا</h3>
+    <h3 style="margin:0 0 4px;color:#064e3b">${typeImg("other", 24)} روابطنا / مواقعنا</h3>
     <div style="font-size:12px;color:#78716c;margin-bottom:12px">الروابط المفعّلة تظهر للزبناء أسفل الموقع تحت «تابعنا». يمكنك تشغيل أي رابط أو إطفاؤه دون حذفه.</div>
     <div id="lkForm" class="users-filters" style="grid-template-columns:repeat(2,1fr)">
-      <div><label>النوع</label><select id="lkType">${TYPES.map(([k, v]) => `<option value="${k}">${v}</option>`).join("")}</select></div>
+      <div><label>النوع <span id="lkTypeIcon">${typeImg("website", 24)}</span></label><select id="lkType">${TYPES.map(([k, v]) => `<option value="${k}">${v}</option>`).join("")}</select></div>
       <div><label>العنوان الظاهر</label><input id="lkTitle" maxlength="100" placeholder="مثال: صفحتنا على فيسبوك"></div>
       <div style="grid-column:1/-1"><label>الرابط</label><input id="lkUrl" dir="ltr" type="url" maxlength="500" placeholder="https://..."></div>
       <div><label>الترتيب</label><input id="lkOrder" type="number" min="0" value="${nextOrder}"></div>
@@ -69,7 +70,7 @@ export async function renderLinksTab(el) {
         ? links
             .map(
               (l) => `<div class="user-order" style="display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap;${l.enabled ? "" : "opacity:.6"}">
-        <div style="min-width:0;flex:1 1 220px"><b>${ICON[l.type] || "🔗"} ${esc(l.title)}</b>
+        <div style="min-width:0;flex:1 1 220px"><b>${typeImg(l.type, 30)} ${esc(l.title)}</b>
           <div dir="ltr" style="font-size:11px;color:#78716c;overflow-wrap:anywhere;text-align:right">${esc(l.url)}</div></div>
         <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
           <button type="button" class="btn-outline-sm" data-toggle="${esc(l.id)}">${l.enabled ? "✅ مفعّل — إطفاء" : "⛔ مطفأ — تشغيل"}</button>
@@ -82,6 +83,7 @@ export async function renderLinksTab(el) {
     }
   </div>`;
   const $ = (id) => document.getElementById(id);
+  $("lkType").addEventListener("change", () => ($("lkTypeIcon").innerHTML = typeImg($("lkType").value, 24)));
   const payload = (existing) => ({
     title: $("lkTitle").value.trim(),
     url: $("lkUrl").value.trim(),
@@ -125,6 +127,7 @@ export async function renderLinksTab(el) {
     b.addEventListener("click", () => {
       const l = links.find((x) => x.id === b.dataset.edit);
       $("lkType").value = l.type;
+      $("lkTypeIcon").innerHTML = typeImg(l.type, 24);
       $("lkTitle").value = l.title;
       $("lkUrl").value = l.url;
       $("lkOrder").value = l.order || 0;

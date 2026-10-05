@@ -25,6 +25,7 @@ import {
 } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-auth.js";
 
 import { renderUsersTab, renderPrivacyTab, initAdminExtras } from "./admin-users.js";
+import "./pw-eye.js";
 import { renderLinksTab, initAdminLinks } from "./admin-links.js";
 
 setPersistence(auth, browserLocalPersistence).catch(() => {});
@@ -235,7 +236,7 @@ function renderAdminSidebar() {
     { id: "orders", icon: ico("orders"), label: "الطلبات" },
     { id: "users", icon: ico("customers"), label: "المستخدمون / إدارة الحسابات" },
     { id: "privacy", icon: ico("verify"), label: "سياسة الخصوصية" },
-    { id: "links", icon: ico("verify"), label: "🔗 روابطنا / مواقعنا" },
+    { id: "links", icon: ico("link-other"), label: "روابطنا / مواقعنا" },
     { id: "loyalty", icon: ico("rewards"), label: "الولاء" },
     { id: "payments", icon: ico("paiement"), label: "طرق الدفع" },
     { id: "support", icon: ico("support"), label: "الدعم" },
