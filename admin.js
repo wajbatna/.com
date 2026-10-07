@@ -26,6 +26,7 @@ import {
 
 import { renderUsersTab, renderPrivacyTab, initAdminExtras } from "./admin-users.js";
 import "./pw-eye.js";
+import { RECEIPT_METHODS } from "./receipts.js";
 import { renderLinksTab, initAdminLinks } from "./admin-links.js";
 
 setPersistence(auth, browserLocalPersistence).catch(() => {});
@@ -196,6 +197,7 @@ onAuthStateChanged(auth, async (user) => {
     menuBtn.style.display = "flex";
     subscribeMeals();
     watchAdminUnread();
+    watchReceipts();
     switchTab("meals");
   } else {
     loginScreen.style.display = "block";
@@ -263,6 +265,25 @@ let unreadAdminCount = 0;
 let unreadAdminUnsub = null;
 let lastSeenAdminUnreadIds = new Set();
 let adminUnreadInitialized = false;
+// تنبيه المشرف عند رفع زبون إيصال جديد (قيد المراجعة)
+let receiptsUnsub = null;
+let receiptsInitialized = false;
+function watchReceipts() {
+  if (receiptsUnsub) return;
+  receiptsUnsub = onSnapshot(
+    query(collection(db, "receipts"), where("status", "==", "pending")),
+    (snap) => {
+      if (receiptsInitialized && snap.docChanges().some((c) => c.type === "added")) {
+        playNotifySound();
+        toast("🧾 إيصال دفع جديد — راجع الطلبات");
+        if (currentTab === "orders") renderOrdersTab();
+      }
+      receiptsInitialized = true;
+    },
+    () => {}
+  );
+}
+
 function watchAdminUnread() {
   if (unreadAdminUnsub) return;
   const q = query(collection(db, "messages"), where("senderRole", "==", "customer"), where("readByAdmin", "==", false));
@@ -442,6 +463,28 @@ function canAcceptOrder(status) {
 }
 
 let ordersCache = [];
+// إيصالات الدفع (معلومات خفيفة فقط: الحالة...) — الصورة كتتجاب غير ملي كيتفتح تفاصيل الطلب
+let receiptsMap = new Map();
+async function loadReceiptsMap() {
+  try {
+    const snap = await getDocs(collection(db, "receipts"));
+    receiptsMap = new Map(snap.docs.map((d) => [d.id, d.data()]));
+  } catch (e) {
+    receiptsMap = new Map();
+  }
+}
+const RECEIPT_BADGE = {
+  pending: ["🧾 إيصال قيد المراجعة", "background:#fef3c7;color:#92400e"],
+  approved: ["🧾 إيصال مقبول", "background:#dcfce7;color:#166534"],
+  rejected: ["🧾 إيصال مرفوض", "background:#fee2e2;color:#991b1b"],
+};
+function receiptBadgeHtml(o) {
+  if (!RECEIPT_METHODS.includes(o.paymentMethod)) return "";
+  const r = receiptsMap.get(o.id);
+  if (!r) return `<span class="info-tag" style="background:#f5f5f4;color:#78716c">🧾 بدون إيصال</span>`;
+  const b = RECEIPT_BADGE[r.status] || RECEIPT_BADGE.pending;
+  return `<span class="info-tag" style="${b[1]};font-weight:800">${b[0]}</span>`;
+}
 // فلتر حالة الطلبات (الكل / قيد المراجعة / مقبول / قيد التحضير / جاهز / تم التوصيل / ملغى من الزبون / ملغى من المشرف)
 let ordersFilter = "all";
 const ORDER_FILTERS = [
@@ -482,6 +525,7 @@ async function renderOrdersTab(keepCache) {
       a.innerHTML = `<div class="empty">⚠️ تعذر تحميل الطلبات.</div>`;
       return;
     }
+    await loadReceiptsMap();
   }
   const visibleOrders = filteredOrders();
   const filterBar = `<div class="admin-card" style="padding:12px 16px"><label style="margin:0 0 6px">تصفية الطلبات حسب الحالة</label>
@@ -515,6 +559,7 @@ async function renderOrdersTab(keepCache) {
    <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">
      <span class="info-tag">${locLabel}</span>
      <span class="info-tag">${mealLabel}</span>
+     ${receiptBadgeHtml(o)}
      ${(o.items || []).some((i) => i.pack) ? `<span class="info-tag" style="background:#fef3c7;color:#92400e;font-weight:800">${ico("plan")}طلب باقة</span>` : ""}
    </div>
    ${
@@ -602,6 +647,60 @@ async function acceptOrder(id, btn) {
 }
 
 // تفاصيل الطلب الكاملة (بطاقات منفصلة) — Full Screen بشكل طبيعي فالهاتف حيت adminContent كتاخد الشاشة كاملة
+// قسم الإيصال فتفاصيل الطلب: كيجيب الصورة (receiptImages) وكيعطي المشرف قبول/رفض
+async function renderAdminReceipt(o) {
+  const box = document.getElementById("adminReceiptBox");
+  if (!box) return;
+  const r = receiptsMap.get(o.id);
+  const head = `<h4>${ico("paiement")}إيصال الدفع</h4>`;
+  if (!r) {
+    box.innerHTML = head + `<div class="order-detail-row"><span>لم يرفع الزبون إيصالاً بعد.</span></div>`;
+    return;
+  }
+  box.innerHTML = head + `<div class="empty" style="padding:12px">${ico("loading")}جارٍ تحميل الصورة...</div>`;
+  let image = "";
+  try {
+    const snap = await getDoc(doc(db, "receiptImages", o.id));
+    image = snap.exists() ? snap.data().image || "" : "";
+  } catch (e) {
+    box.innerHTML = head + `<div class="empty" style="padding:12px">⚠️ تعذر تحميل صورة الإيصال.</div>`;
+    return;
+  }
+  const b = RECEIPT_BADGE[r.status] || RECEIPT_BADGE.pending;
+  const safeImg = /^data:image\/(jpeg|png|webp);base64,/.test(image) ? image : "";
+  box.innerHTML =
+    head +
+    `<div style="margin-bottom:8px"><span class="info-tag" style="${b[1]};font-weight:800">${b[0]}</span></div>
+    ${r.adminNote ? `<div style="font-size:12px;color:#57534e;margin-bottom:8px">ملاحظتك: ${escapeHtml(r.adminNote)}</div>` : ""}
+    ${safeImg ? `<img id="receiptImgAdmin" src="${safeImg}" alt="إيصال الدفع" style="max-width:100%;max-height:320px;border-radius:12px;border:1px solid #e7e5e4;cursor:zoom-in">` : `<div class="empty" style="padding:12px">لا توجد صورة.</div>`}
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
+      <button type="button" class="btn-accept" id="rcApprove" ${r.status === "approved" ? "disabled" : ""}>✓ قبول الإيصال</button>
+      <button type="button" class="btn-danger-sm" id="rcReject" ${r.status === "rejected" ? "disabled" : ""}>✕ رفض الإيصال</button>
+    </div>`;
+  document.getElementById("receiptImgAdmin")?.addEventListener("click", (ev) => {
+    const im = ev.currentTarget;
+    const big = im.style.maxHeight === "none";
+    im.style.maxHeight = big ? "320px" : "none";
+    im.style.cursor = big ? "zoom-in" : "zoom-out";
+  });
+  const review = async (status, note) => {
+    try {
+      await updateDoc(doc(db, "receipts", o.id), { status, adminNote: note, reviewedAt: serverTimestamp(), reviewedBy: auth.currentUser.uid });
+      receiptsMap.set(o.id, { ...r, status, adminNote: note });
+      toast(status === "approved" ? "تم قبول الإيصال ✓" : "تم رفض الإيصال");
+      renderAdminReceipt(o);
+    } catch (e) {
+      toast("تعذر تحديث الإيصال (تحقق من نشر قواعد Firestore).", "error");
+    }
+  };
+  document.getElementById("rcApprove")?.addEventListener("click", () => review("approved", ""));
+  document.getElementById("rcReject")?.addEventListener("click", () => {
+    const note = prompt("سبب الرفض (اختياري، يراه الزبون):", "");
+    if (note === null) return;
+    review("rejected", note.trim().slice(0, 300));
+  });
+}
+
 function openOrderDetailAdmin(id) {
   const o = ordersCache.find((x) => x.id === id);
   const a = document.getElementById("adminContent");
@@ -662,6 +761,8 @@ function openOrderDetailAdmin(id) {
       <div class="order-detail-row"><span>${escapeHtml(o.paymentMethodLabel || "غير محدد")}</span></div>
     </div>
 
+    ${RECEIPT_METHODS.includes(o.paymentMethod) ? `<div class="order-detail-section" id="adminReceiptBox"></div>` : ""}
+
     <div class="order-detail-section">
       <h4>${ico("money")}المبلغ</h4>
       <div class="order-detail-row"><span>المجموع</span><b>${money(o.total)}</b></div>
@@ -687,6 +788,7 @@ function openOrderDetailAdmin(id) {
     </div>
   `;
   document.getElementById("backToOrdersBtn").addEventListener("click", renderOrdersTab);
+  if (document.getElementById("adminReceiptBox")) renderAdminReceipt(o);
   document.getElementById("editOrderBtn").addEventListener("click", () => openOrderEditAdmin(o.id));
   a.querySelectorAll(".copy-link-btn").forEach((btn) =>
     btn.addEventListener("click", async () => {

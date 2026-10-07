@@ -1,5 +1,6 @@
 // app.js — منطق الواجهة الأمامية (الزبون) — ثنائي اللغة + حساب + بطاقة العضوية
 import "./pw-eye.js";
+import { RECEIPT_METHODS, compressReceiptImage } from "./receipts.js";
 import { db, auth } from "./firebase.js";
 import { getLang, setLang, t } from "./i18n.js";
 import {
@@ -1252,9 +1253,11 @@ async function submitOrder(e) {
        <div class="confirm-ref">${orderCode(ref.id)}</div>
        <button type="button" class="copy-link-btn" data-copy="${escapeAttr(orderCode(ref.id))}" onclick="copyOrderNumber(this)" style="border:0;background:#f0fdf4;color:#047857;border-radius:8px;padding:6px 14px;font-size:13px;font-weight:800;cursor:pointer;margin:2px 0 10px">${s.copyOrderNumber}</button>
        <p>${s.orderWillContact(escapeHtml(phone))}</p>
+       ${RECEIPT_METHODS.includes(order.paymentMethod) ? `<div class="order-detail-section" id="receiptBlockSuccess" style="text-align:right;margin:10px 0"></div>` : ""}
        <button type="button" class="checkout" onclick="closeCheckout();scrollToMenu()">${s.newOrderBtn}</button>
      </div>`;
     box.scrollTop = 0;
+    if (document.getElementById("receiptBlockSuccess")) renderReceiptBlock(ref.id, "receiptBlockSuccess");
   } catch (err) {
     toast(s.orderError, "error");
     if (submitBtn) {
@@ -1534,8 +1537,10 @@ function openOrderDetail(id) {
         ? `<div class="order-detail-section"><h4>📝 ${s.orderNotesLabel}</h4><div class="order-detail-row"><span>${escapeHtml(o.customer.notes)}</span></div></div>`
         : ""
     }
+    ${RECEIPT_METHODS.includes(o.paymentMethod) && !["ملغى من طرف الزبون", "ملغى من المشرف", "ملغي"].includes(o.status) ? `<div class="order-detail-section" id="receiptBlock"></div>` : ""}
     ${cancelOrderBlockHtml(o, s)}
   `;
+  if (document.getElementById("receiptBlock")) renderReceiptBlock(o.id, "receiptBlock");
 }
 
 async function renderRewardsPage() {
@@ -2457,6 +2462,82 @@ function touchLastLogin(uid) {
   updateDoc(doc(db, "users", uid), { lastLoginAt: serverTimestamp() }).catch(() => {});
 }
 
+
+/* ═══════ إيصال الدفع (رفع صورة الإيصال للطلبات لي ماشي عند الاستلام) ═══════ */
+// الصورة كتتضغط فالمتصفح وكتتخزن فـ Firestore (receiptImages)، والحالة فـ receipts. القبول/الرفض من المشرف فقط.
+async function renderReceiptBlock(orderId, containerId) {
+  const box = document.getElementById(containerId);
+  if (!box || !currentUser) return;
+  const s = t(lang);
+  let meta = null;
+  try {
+    const snap = await getDoc(doc(db, "receipts", orderId));
+    meta = snap.exists() ? snap.data() : null;
+  } catch (e) {
+    box.innerHTML = `<h4>${ico("paiement")}${s.receiptTitle}</h4><div class="notice">${s.receiptLoadFailed}</div>`;
+    return;
+  }
+  const st = meta ? meta.status : null;
+  const statusText = !meta ? s.receiptNone : st === "approved" ? s.receiptApproved : st === "rejected" ? s.receiptRejected : s.receiptPending;
+  const color = st === "approved" ? "#166534" : st === "rejected" ? "#991b1b" : "#92400e";
+  const canUpload = !meta || st === "rejected";
+  const note = st === "rejected" && meta.adminNote ? `<div style="font-size:12px;color:#57534e;margin-top:6px">${s.receiptAdminNote}: ${escapeHtml(meta.adminNote)}</div>` : "";
+  box.innerHTML = `
+    <h4>${ico("paiement")}${s.receiptTitle}</h4>
+    <div style="font-weight:800;font-size:13px;color:${color}">${statusText}</div>${note}
+    ${
+      canUpload
+        ? `<label style="margin-top:10px">${s.receiptPick}</label>
+      <input type="file" accept="image/*" id="receiptFile_${orderId}" onchange="previewReceipt('${orderId}')">
+      <img id="receiptPrev_${orderId}" alt="" style="display:none;max-width:100%;max-height:220px;border-radius:12px;margin-top:8px;border:1px solid #e7e5e4">
+      <p id="receiptErr_${orderId}" style="color:#dc2626;font-size:12px;margin:6px 0 0"></p>
+      <button type="button" class="checkout" id="receiptBtn_${orderId}" style="width:100%;margin-top:10px" onclick="submitReceipt('${orderId}','${containerId}')">${st === "rejected" ? s.receiptReupload : s.receiptUploadBtn}</button>`
+        : ""
+    }`;
+}
+function previewReceipt(orderId) {
+  const f = document.getElementById("receiptFile_" + orderId)?.files?.[0];
+  const img = document.getElementById("receiptPrev_" + orderId);
+  if (!img) return;
+  if (f && /^image\//.test(f.type)) {
+    img.src = URL.createObjectURL(f);
+    img.style.display = "block";
+  } else img.style.display = "none";
+}
+async function submitReceipt(orderId, containerId) {
+  const s = t(lang);
+  const f = document.getElementById("receiptFile_" + orderId)?.files?.[0];
+  const err = document.getElementById("receiptErr_" + orderId);
+  const btn = document.getElementById("receiptBtn_" + orderId);
+  if (!f) {
+    err.textContent = s.receiptPickFirst;
+    return;
+  }
+  err.textContent = "";
+  btn.disabled = true;
+  try {
+    const image = await compressReceiptImage(f);
+    const metaRef = doc(db, "receipts", orderId);
+    const imgRef = doc(db, "receiptImages", orderId);
+    const existing = await getDoc(metaRef);
+    const b = writeBatch(db);
+    if (existing.exists()) {
+      // إعادة رفع بعد الرفض: الحالة ترجع قيد المراجعة والصورة كتتبدل
+      b.update(metaRef, { status: "pending", updatedAt: serverTimestamp() });
+      b.update(imgRef, { image, updatedAt: serverTimestamp() });
+    } else {
+      b.set(metaRef, { uid: currentUser.uid, orderId, status: "pending", createdAt: serverTimestamp() });
+      b.set(imgRef, { uid: currentUser.uid, orderId, image, createdAt: serverTimestamp() });
+    }
+    await b.commit();
+    toast(s.receiptSent);
+    await renderReceiptBlock(orderId, containerId);
+  } catch (e) {
+    err.textContent = e && e.message === "bad-image" ? s.receiptBadImage : s.receiptFailed;
+    btn.disabled = false;
+  }
+}
+
 /* ═══════ إلغاء الطلب من طرف الزبون ═══════ */
 // ⚠️ الفحص هنا للواجهة فقط (إظهار/إخفاء الزر). التحقق الحقيقي كيتدار فـ firestore.rules (ownerCanCancel)
 // بوقت السيرفر (request.time) مقابل createdAt المحفوظ، فتغيير ساعة الهاتف ما كيأثر على النتيجة.
@@ -3050,6 +3131,8 @@ Object.assign(window, {
   copyOrderNumber,
   renderEditProfile,
   submitEditProfile,
+  previewReceipt,
+  submitReceipt,
   renderAccountProfile,
   openPrivacyPolicy,
   closePrivacyPolicy,
