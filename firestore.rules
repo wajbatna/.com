@@ -548,6 +548,58 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    // ───────────── إيصالات الدفع (receipts = معلومات خفيفة، receiptImages = الصورة) ─────────────
+    // الزبون كيرفع إيصال لطلبو هو فقط (طرق الأداء لي ماشي عند الاستلام)، والأدمين هو لي كيقبل/كيرفض.
+    // الزبون ما يقدرش يبدل الحالة؛ يقدر يعاود يرفع غير إلا كان الإيصال مرفوض.
+    function receiptOrderOk(orderId) {
+      return exists(/databases/$(database)/documents/orders/$(orderId))
+        && get(/databases/$(database)/documents/orders/$(orderId)).data.uid == request.auth.uid
+        && get(/databases/$(database)/documents/orders/$(orderId)).data.paymentMethod in ['card', 'cih', 'fellah', 'cashplus', 'wafacash', 'tijari', 'baridbank']
+        && !(get(/databases/$(database)/documents/orders/$(orderId)).data.get('status', '') in ['ملغى من طرف الزبون', 'ملغى من المشرف', 'ملغي']);
+    }
+    function validReceiptImage(img) {
+      return img is string && img.size() > 100 && img.size() <= 600000
+        && img.matches('^data:image/(jpeg|png|webp);base64,.*');
+    }
+    match /receipts/{orderId} {
+      allow get: if isSignedIn() && (resource == null || resource.data.uid == request.auth.uid || isAdmin());
+      allow list: if isAdmin();
+      allow create: if isSignedIn() && receiptOrderOk(orderId)
+        && request.resource.data.keys().hasOnly(['uid', 'orderId', 'status', 'createdAt'])
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.orderId == orderId
+        && request.resource.data.status == 'pending'
+        && request.resource.data.createdAt == request.time;
+      allow update: if (isAdmin()
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'adminNote', 'reviewedAt', 'reviewedBy'])
+          && request.resource.data.status in ['pending', 'approved', 'rejected']
+          && request.resource.data.get('adminNote', '') is string && request.resource.data.get('adminNote', '').size() <= 300
+          && request.resource.data.reviewedAt == request.time
+          && request.resource.data.reviewedBy == request.auth.uid)
+        || (isSignedIn() && resource.data.uid == request.auth.uid && resource.data.status == 'rejected' && receiptOrderOk(orderId)
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'updatedAt'])
+          && request.resource.data.status == 'pending'
+          && request.resource.data.updatedAt == request.time);
+      allow delete: if isAdmin();
+    }
+    match /receiptImages/{orderId} {
+      allow get: if isSignedIn() && (resource.data.uid == request.auth.uid || isAdmin());
+      allow list: if false;
+      allow create: if isSignedIn() && receiptOrderOk(orderId)
+        && !exists(/databases/$(database)/documents/receipts/$(orderId))
+        && request.resource.data.keys().hasOnly(['uid', 'orderId', 'image', 'createdAt'])
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.orderId == orderId
+        && validReceiptImage(request.resource.data.image)
+        && request.resource.data.createdAt == request.time;
+      allow update: if isSignedIn() && resource.data.uid == request.auth.uid && receiptOrderOk(orderId)
+        && get(/databases/$(database)/documents/receipts/$(orderId)).data.status == 'rejected'
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['image', 'updatedAt'])
+        && validReceiptImage(request.resource.data.image)
+        && request.resource.data.updatedAt == request.time;
+      allow delete: if isAdmin();
+    }
+
     // ───────────── siteLinks (روابطنا / مواقعنا: فيسبوك، إنستغرام، موقع، خريطة...) ─────────────
     // القراءة عامة (روابط للعرض فـ footer)، والكتابة للأدمين فقط، والرابط لازم يبدا بـ http(s):// أو tel: أو mailto:
     function validSiteLink(d) {
