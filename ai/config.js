@@ -8,6 +8,9 @@
 // الموديل المستعمل عبر Firebase AI Logic
 export const AI_MODEL = "gemini-3.5-flash";
 
+// موديلات احتياطية: إلا رجع الموديل الأساسي 404/500/503 (ضغط عالي أو غير متاح) كيجرب الموالي أوتوماتيكياً
+export const AI_FALLBACK_MODELS = ["gemini-3.5-flash-lite", "gemini-3.1-flash-lite"];
+
 // وضع التشخيص: true = يعرض سبب الفشل داخل المحادثة (بدون أي مفتاح). غيّره إلى false بعد أن يعمل المساعد.
 export const AI_DEBUG = true;
 

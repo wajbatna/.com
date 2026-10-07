@@ -11,7 +11,7 @@
 //     و"Generative Language API"؛ وإلا كانت عندو HTTP referrers لازم يكون فيها wajbatna.github.io/*
 //  3) Firebase Console > App Check: إلا كان AI Logic "Enforced" بلا ما يكون App Check مدمج فالموقع، كيرجع 401/403.
 import { app } from "../firebase.js";
-import { AI_MODEL, AI_LIMITS } from "./config.js";
+import { AI_MODEL, AI_FALLBACK_MODELS, AI_LIMITS } from "./config.js";
 
 export class GeminiError extends Error {
   constructor(kind) {
@@ -73,13 +73,15 @@ function mapError(e) {
 // contents: [{ role: "user"|"model", parts: [{ text }] }]
 export async function askGemini(systemText, contents) {
   let attempt = 0;
+  const models = [AI_MODEL, ...(AI_FALLBACK_MODELS || [])];
+  let mi = 0;
   for (;;) {
     try {
       const { sdk, ai } = await getAiClient();
       const model = sdk.getGenerativeModel(
         ai,
         {
-          model: AI_MODEL,
+          model: models[mi],
           systemInstruction: { role: "system", parts: [{ text: systemText }] },
           generationConfig: { temperature: 0.3, maxOutputTokens: AI_LIMITS.maxOutputTokens },
         },
@@ -98,6 +100,12 @@ export async function askGemini(systemText, contents) {
       return text;
     } catch (raw) {
       const e = mapError(raw);
+      // الموديل الحالي مشغول/غير متاح → جرّب الموديل الاحتياطي مباشرة
+      if (e.kind === "http" && [404, 500, 502, 503, 504].includes(e.status) && mi < models.length - 1) {
+        console.warn("[Wajbatna AI] fallback from", models[mi], "status", e.status);
+        mi++;
+        continue;
+      }
       const retryable = e.kind === "network" || (e.kind === "http" && e.status >= 500);
       if (retryable && attempt < AI_LIMITS.maxRetries) {
         attempt++;
