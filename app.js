@@ -2142,7 +2142,8 @@ function renderAccountAuth() {
        <p id="authError" style="color:#dc2626;font-size:12px;margin:6px 0 0"></p>
        <button class="checkout" type="submit" style="width:100%;margin-top:14px">${s.loginBtn}</button>
      </form>
-     ${socialLoginHtml(s)}`;
+     ${socialLoginHtml(s)}
+     <div class="pwa-slot"></div>`;
   } else {
     el.innerHTML = `
      <div class="modal-head"><h3>${ico("account")}${s.signupTitle}</h3><button class="close" onclick="closeAccount()">${ico("close")}</button></div>
@@ -2164,7 +2165,8 @@ function renderAccountAuth() {
        <p id="authError" style="color:#dc2626;font-size:12px;margin:6px 0 0"></p>
        <button class="checkout" type="submit" style="width:100%;margin-top:14px">${s.signupBtn}</button>
      </form>
-     ${socialLoginHtml(s)}`;
+     ${socialLoginHtml(s)}
+     <div class="pwa-slot"></div>`;
   }
   signupGender = "male";
 }
