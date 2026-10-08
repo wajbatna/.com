@@ -107,3 +107,23 @@ button{font-family:inherit;cursor:pointer}
 .alert-new{position:fixed;inset-inline:12px;top:calc(10px + var(--sat));z-index:150;background:var(--acc);color:#3b2400;border-radius:16px;padding:14px;font-weight:800;box-shadow:0 10px 30px #0005;display:flex;align-items:center;gap:10px;animation:up .25s ease;border:0;width:calc(100% - 24px);text-align:start;font-size:15px}
 .offline{background:#334155;color:#fff;text-align:center;padding:7px;font-size:12px;font-weight:700}
 .leaflet-container{font-family:inherit}
+
+/* أيقونات حقيقية */
+.nav button .drv-i{font-size:25px}
+.acts .drv-i{font-size:26px}
+.empty .em .drv-i{font-size:56px;color:#94a3b8}
+.pend .big .drv-i{font-size:60px;color:var(--p)}
+.steps .dot .drv-i{font-size:14px;vertical-align:middle}
+.sheet .hd button .drv-i{font-size:20px;vertical-align:middle}
+.btn .drv-i{font-size:20px}.chip .drv-i{font-size:13px}.job .ad .drv-i{font-size:14px;vertical-align:-.2em}
+.alert-new .drv-i{font-size:32px}
+
+/* شحن المحفظة */
+.paygrid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}
+.payopt{display:flex;align-items:center;gap:8px;border:1.5px solid var(--line);background:#fff;border-radius:13px;padding:9px;font-weight:700;font-size:13px;color:var(--tx);text-align:start}
+.payopt img{width:34px;height:34px;object-fit:contain;border-radius:8px;flex:none}
+.payopt.on{border-color:var(--p3);background:#ecfdf5}
+.copyrow{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:8px}
+.copyrow small{display:block;opacity:.75}.copyrow b{word-break:break-all}
+.upl{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;min-height:110px;border:2px dashed var(--line);border-radius:14px;color:var(--mut);font-weight:700;font-size:13px;cursor:pointer;overflow:hidden}
+.upl .drv-i{font-size:30px}.upl img{max-width:100%;max-height:220px;display:block}

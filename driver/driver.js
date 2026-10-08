@@ -2,12 +2,16 @@
 // مرتبط بنفس مشروع Firebase: orders (الطلبات المعيّنة) + deliveries (حالة كل توصيلة) + drivers (البروفايل/الاتصال).
 import { db, auth } from "../firebase.js";
 import {
-  collection, doc, getDoc, getDocs, setDoc, updateDoc, onSnapshot, query, where, serverTimestamp,
+  collection, doc, getDoc, getDocs, setDoc, updateDoc, onSnapshot, query, where, serverTimestamp, writeBatch,
 } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
 import {
   createUserWithEmailAndPassword, signInWithEmailAndPassword, onAuthStateChanged,
   setPersistence, browserLocalPersistence, signOut, sendPasswordResetEmail,
 } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-auth.js";
+
+import { ic, setIconBase } from "../drvicons.js";
+import { compressReceiptImage } from "../receipts.js";
+setIconBase("../");
 
 setPersistence(auth, browserLocalPersistence).catch(() => {});
 if ("serviceWorker" in navigator) window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {}));
@@ -62,6 +66,7 @@ const S = {
   user: null, me: null, screen: "loading", authTab: "login",
   tab: "home", jobsSeg: "today", openKey: null,
   orders: new Map(), deliveries: new Map(), fee: 0,
+  wallet: null, txs: [], topups: [], payCfg: {},
   pos: null, busy: false, offline: !navigator.onLine,
 };
 let unsubs = [];
@@ -133,13 +138,13 @@ async function systemNotify(title, body) {
 }
 function newJobAlert(o) {
   beep(); try { navigator.vibrate?.([250, 120, 250, 120, 400]); } catch (e) {}
-  const title = "🛵 طلب جديد معيّن ليك";
+  const title = "طلب جديد معيّن ليك";
   const body = `${o.customer?.name || ""} — ${o.customer?.address || ""}`.slice(0, 120);
   systemNotify(title, body);
   const old = document.querySelector(".alert-new"); if (old) old.remove();
   const b = document.createElement("button");
   b.className = "alert-new"; b.type = "button";
-  b.innerHTML = `<span style="font-size:26px">🛵</span><span style="flex:1">${esc(title)}<small style="display:block;font-weight:600;opacity:.8;margin-top:2px">${esc(body)}</small></span>`;
+  b.innerHTML = `<span style="font-size:30px">${ic("scooter")}</span><span style="flex:1">${esc(title)}<small style="display:block;font-weight:600;opacity:.8;margin-top:2px">${esc(body)}</small></span>`;
   b.onclick = () => { b.remove(); S.tab = "jobs"; S.jobsSeg = "today"; render(); };
   document.body.appendChild(b);
   setTimeout(() => b.remove(), 12000);
@@ -170,26 +175,26 @@ function pushLocation(force) {
   if (!S.pos || !S.me || S.me.status !== "active") return;
   const now = Date.now();
   const loc = { lat: +S.pos.lat.toFixed(6), lng: +S.pos.lng.toFixed(6), at: now };
-  if (force || now - lastDeliveryPush > 12000) {
+  if (force || now - lastDeliveryPush > 5000) {
     for (const d of S.deliveries.values()) {
       if (!isActive(d.status)) continue;
       lastDeliveryPush = now;
       updateDoc(doc(db, "deliveries", d.id), { driverLoc: loc, updatedAt: serverTimestamp() }).catch(() => {});
     }
   }
-  if (S.me.online && (force || now - lastDriverPush > 30000)) {
+  if (S.me.online && (force || now - lastDriverPush > 5000)) {
     lastDriverPush = now;
     updateDoc(doc(db, "drivers", S.user.uid), { lastLoc: loc, lastSeenAt: serverTimestamp() }).catch(() => {});
   }
 }
 setInterval(() => { // نبض: يبقى السائق "متصل" عند الأدمين حتى بلا حركة
-  if (S.me?.online && S.user && Date.now() - lastDriverPush > 40000) {
+  if (S.me?.online && S.user && Date.now() - lastDriverPush > 15000) {
     lastDriverPush = Date.now();
     const patch = { lastSeenAt: serverTimestamp() };
     if (S.pos) patch.lastLoc = { lat: +S.pos.lat.toFixed(6), lng: +S.pos.lng.toFixed(6), at: Date.now() };
     updateDoc(doc(db, "drivers", S.user.uid), patch).catch(() => {});
   }
-}, 20000);
+}, 5000);
 
 async function toggleOnline() {
   if (S.busy || !S.me) return;
@@ -204,7 +209,7 @@ async function toggleOnline() {
     const patch = { online: next, lastSeenAt: serverTimestamp() };
     if (next && S.pos) patch.lastLoc = { lat: +S.pos.lat.toFixed(6), lng: +S.pos.lng.toFixed(6), at: Date.now() };
     await updateDoc(doc(db, "drivers", S.user.uid), patch);
-    toast(next ? "أنت الآن متصل ✅ غادي توصلك الطلبات" : "أنت الآن غير متصل");
+    toast(next ? "أنت الآن متصل — غادي توصلك الطلبات" : "أنت الآن غير متصل");
   } catch (e) { toast(errMsg(e), "err"); }
   S.busy = false;
   syncTracking();
@@ -234,7 +239,7 @@ async function actStart(job) {
     const l = locNow(); if (l) data.driverLoc = l;
     await setDoc(doc(db, "deliveries", job.key), data);
     await markOrderStatus(o, "خرج للتوصيل");
-    toast("انطلقت! الزبون كيتتبعك دابا 🛵", "ok");
+    toast("انطلقت! الزبون كيتتبعك دابا", "ok");
   } catch (e) { toast(errMsg(e), "err"); }
   S.busy = false; syncTracking(); render();
 }
@@ -244,7 +249,7 @@ async function actArrive(job) {
     const patch = { status: "arrived", arrivedAt: serverTimestamp(), updatedAt: serverTimestamp() };
     const l = locNow(); if (l) patch.driverLoc = l;
     await updateDoc(doc(db, "deliveries", job.key), patch);
-    toast("تم إعلام الزبون بوصولك 📍", "ok");
+    toast("تم إعلام الزبون بوصولك", "ok");
   } catch (e) { toast(errMsg(e), "err"); }
   S.busy = false; render();
 }
@@ -256,7 +261,7 @@ async function actDeliver(job, collected) {
     const l = locNow(); if (l) patch.driverLoc = l;
     await updateDoc(doc(db, "deliveries", job.key), patch);
     await markOrderStatus(job.order, "تم التسليم");
-    toast("تم التسليم 🎉 بارك الله فيك", "ok");
+    toast("تم التسليم — بارك الله فيك", "ok");
     beep();
   } catch (e) { toast(errMsg(e), "err"); }
   S.busy = false; syncTracking(); render();
@@ -277,14 +282,14 @@ function render() {
   const app = $("app");
   if (S.screen === "loading") { app.innerHTML = `<div class="auth"><div class="brand"><img src="icons/icon-192.png" alt=""><b>وجبتنا</b><span>جارٍ التحميل…</span></div></div>`; return; }
   if (S.screen === "auth") return renderAuth(app);
-  if (S.screen === "pending") return renderGate(app, "⏳", "طلبك قيد المراجعة", "تم استلام طلب تسجيلك. غادي تتفعل حسابك من طرف إدارة وجبتنا وتقدر تبدا الخدمة. هاد الصفحة كتتحدّث وحدها.");
-  if (S.screen === "suspended") return renderGate(app, "⛔", "حسابك موقوف", "تواصل مع إدارة وجبتنا لمعرفة السبب وإعادة التفعيل.");
+  if (S.screen === "pending") return renderGate(app, ic("hourglass"), "طلبك قيد المراجعة", "تم استلام طلب تسجيلك. غادي تتفعل حسابك من طرف إدارة وجبتنا وتقدر تبدا الخدمة. هاد الصفحة كتتحدّث وحدها.");
+  if (S.screen === "suspended") return renderGate(app, ic("ban"), "حسابك موقوف", "تواصل مع إدارة وجبتنا لمعرفة السبب وإعادة التفعيل.");
   renderShell(app);
 }
 
-function renderGate(app, ic, title, text) {
+function renderGate(app, icon, title, text) {
   app.innerHTML = `<div class="auth"><div class="brand"><img src="icons/icon-192.png" alt=""><b>وجبتنا — السائق</b></div>
-    <div class="box"><div class="pend"><div class="big">${ic}</div><h2>${title}</h2><p>${text}</p>
+    <div class="box"><div class="pend"><div class="big">${icon}</div><h2>${title}</h2><p>${text}</p>
     <button class="btn ghost" id="gOut" type="button">تسجيل الخروج</button></div></div></div>`;
   $("gOut").onclick = () => signOut(auth);
 }
@@ -331,7 +336,7 @@ function renderAuth(app) {
   };
   if ($("aForgot")) $("aForgot").onclick = async () => {
     const m = $("fMail").value.trim(); if (!m) return showErr("دخل الإيميل أولا.");
-    try { await sendPasswordResetEmail(auth, m); toast("بعثنا ليك رابط تغيير كلمة السر ✉️", "ok"); } catch (e) { showErr(errMsg(e)); }
+    try { await sendPasswordResetEmail(auth, m); toast("بعثنا ليك رابط تغيير كلمة السر", "ok"); } catch (e) { showErr(errMsg(e)); }
   };
   if ($("aOut")) $("aOut").onclick = () => signOut(auth);
 }
@@ -341,9 +346,9 @@ function jobCard(j) {
   const codAmt = o.paymentMethod === "cod";
   return `<button class="job s-${j.state}" type="button" data-open="${esc(j.key)}">
     <div class="r1"><span class="nm">${esc(c.name || "زبون")}</span><span class="chip ${STATE_CHIP[j.state]}">${STATE_LABEL[j.state]}</span></div>
-    <div class="ad">📍 ${esc(c.address || "—")}</div>
-    <div class="r3"><span class="chip">🕒 ${esc(hhmm(o.schedule?.deliveryTime) || "—")}</span><span class="chip">📅 ${j.date === todayStr() ? "اليوم" : esc(niceDate(j.date))}</span>
-      ${codAmt ? `<span class="chip y">💵 دفع عند الاستلام</span>` : `<span class="chip g">✔ مدفوع/محوّل</span>`}<span class="chip">${esc(orderCode(o.id))}</span></div></button>`;
+    <div class="ad">${ic("pin")} ${esc(c.address || "—")}</div>
+    <div class="r3"><span class="chip">${ic("clock")} ${esc(hhmm(o.schedule?.deliveryTime) || "—")}</span><span class="chip">${ic("calendar")} ${j.date === todayStr() ? "اليوم" : esc(niceDate(j.date))}</span>
+      ${codAmt ? `<span class="chip y">${ic("money")} دفع عند الاستلام</span>` : `<span class="chip g">${ic("check")} مدفوع/محوّل</span>`}<span class="chip">${esc(orderCode(o.id))}</span></div></button>`;
 }
 
 function homeHtml(jobs) {
@@ -359,8 +364,9 @@ function homeHtml(jobs) {
   <div class="stats"><div class="stat"><b>${st.todayN}</b><span>توصيلات اليوم</span></div>
     <div class="stat"><b>${money(st.todayEarn)}</b><span>أرباح اليوم</span></div>
     <div class="stat"><b>${money(st.todayCash)}</b><span>كاش محصّل اليوم</span></div></div>
+  <button class="card" id="hWallet" type="button" style="display:flex;width:100%;align-items:center;justify-content:space-between;border:0;text-align:start;font-size:15px;font-weight:800"><span>${ic("wallet")} رصيد المحفظة</span><span style="color:${balanceOf() < 0 ? "var(--red)" : "var(--p)"}">${money(balanceOf())}</span></button>
   <div class="h2"><span>${active.length ? "توصيلة جارية" : "الطلب الجاي"}</span>${todo.length ? `<span class="chip b">${todo.length} اليوم</span>` : ""}</div>
-  ${next ? jobCard(next) : `<div class="empty"><div class="em">☕</div>ما كاين حتى طلب معيّن ليك دابا.<br>غادي توصلك تنبيه ملي الإدارة تعيّن ليك طلب جديد.</div>`}`;
+  ${next ? jobCard(next) : `<div class="empty"><div class="em">${ic("scooter")}</div>ما كاين حتى طلب معيّن ليك دابا.<br>غادي توصلك تنبيه ملي الإدارة تعيّن ليك طلب جديد.</div>`}`;
 }
 
 function jobsHtml(jobs) {
@@ -374,17 +380,90 @@ function jobsHtml(jobs) {
   return `<div class="seg"><button data-seg="today" class="${seg === "today" ? "on" : ""}" type="button">اليوم</button>
     <button data-seg="upcoming" class="${seg === "upcoming" ? "on" : ""}" type="button">القادمة</button>
     <button data-seg="done" class="${seg === "done" ? "on" : ""}" type="button">المنجزة</button></div>
-    ${uniq.length ? uniq.map(jobCard).join("") : `<div class="empty"><div class="em">${seg === "done" ? "📦" : "🛵"}</div>${seg === "today" ? "ما كاين طلبات لليوم." : seg === "upcoming" ? "ما كاين طلبات قادمة." : "ما كاين توصيلات منجزة بعد."}</div>`}`;
+    ${uniq.length ? uniq.map(jobCard).join("") : `<div class="empty"><div class="em">${ic(seg === "done" ? "clipboard" : "scooter")}</div>${seg === "today" ? "ما كاين طلبات لليوم." : seg === "upcoming" ? "ما كاين طلبات قادمة." : "ما كاين توصيلات منجزة بعد."}</div>`}`;
 }
 
-function earningsHtml() {
-  const st = stats();
-  const done = [...S.deliveries.values()].filter((d) => d.status === "delivered").sort((a, b) => b.date.localeCompare(a.date) || (b.deliveredAt?.seconds || 0) - (a.deliveredAt?.seconds || 0)).slice(0, 40);
-  return `<div class="big-earn"><span>أرباح هاد الشهر</span><b>${money(st.monthEarn)}</b><span>${st.monthN} توصيلة · كاش محصّل ${money(st.monthCash)}</span></div>
-  <div class="stats"><div class="stat"><b>${money(st.todayEarn)}</b><span>اليوم</span></div><div class="stat"><b>${money(st.weekEarn)}</b><span>آخر 7 أيام</span></div><div class="stat"><b>${st.totalN}</b><span>مجموع التوصيلات</span></div></div>
-  <div class="note">💵 الكاش المحصّل عند الاستلام كيتسلّم لإدارة وجبتنا. المجموع: <b>${money(st.monthCash)}</b> هاد الشهر.</div>
-  <div class="h2"><span>آخر التوصيلات</span></div>
-  <div class="card">${done.length ? done.map((d) => `<div class="row2"><div><b style="color:var(--tx)">${esc(orderCode(d.orderId))}</b><small>${esc(niceDate(d.date))}${d.cod ? " · كاش " + money(d.collected) : ""}</small></div><b>+${money(d.fee)}</b></div>`).join("") : `<div class="empty" style="padding:18px">ما كاين توصيلات بعد.</div>`}</div>`;
+const TOPUP_STATUS = { pending: ["قيد المراجعة", "y"], approved: ["تمت الموافقة", "g"], rejected: ["مرفوض", "r"] };
+const TX_LABEL = { topup: "شحن المحفظة", settlement: "تسوية الأرباح / الكاش", adjust: "تعديل من الإدارة" };
+const balanceOf = () => Number(S.wallet?.balance) || 0;
+
+function walletHtml() {
+  const st = stats(), bal = balanceOf();
+  const done = [...S.deliveries.values()].filter((d) => d.status === "delivered").sort((a, b) => b.date.localeCompare(a.date) || (b.deliveredAt?.seconds || 0) - (a.deliveredAt?.seconds || 0)).slice(0, 15);
+  const topups = [...S.topups].sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0)).slice(0, 10);
+  const txs = [...S.txs].sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0)).slice(0, 25);
+  const unsettledCash = [...S.deliveries.values()].filter((d) => d.status === "delivered" && d.cod && !d.settledAt).reduce((a, d) => a + (Number(d.collected) || 0), 0);
+  const unsettledEarn = [...S.deliveries.values()].filter((d) => d.status === "delivered" && !d.settledAt).reduce((a, d) => a + (Number(d.fee) || 0), 0);
+  return `<div class="big-earn" style="${bal < 0 ? "background:linear-gradient(160deg,#991b1b,#7f1d1d)" : ""}"><span>رصيد المحفظة</span><b>${money(bal)}</b>
+      <span>${bal < 0 ? "عليك مبلغ للإدارة — اشحن محفظتك" : "الرصيد المتوفر"}</span>
+      <button class="btn acc" id="wTopup" type="button" style="margin-top:12px">${ic("plus")} شحن المحفظة</button></div>
+    <div class="stats"><div class="stat"><b>${money(unsettledEarn)}</b><span>أرباح لم تُسوَّ</span></div><div class="stat"><b>${money(unsettledCash)}</b><span>كاش لم يُسلَّم</span></div><div class="stat"><b>${money(st.monthEarn)}</b><span>أرباح الشهر</span></div></div>
+    ${topups.length ? `<div class="h2"><span>طلبات الشحن</span></div><div class="card">${topups.map((t) => { const sl = TOPUP_STATUS[t.status] || ["", ""]; return `<div class="row2"><div><b style="color:var(--tx)">${money(t.amount)}</b><small>${esc(payLabel(t.method))} · ${esc(t.createdAt?.toDate ? t.createdAt.toDate().toLocaleDateString("ar-MA") : "")}${t.adminNote ? " · " + esc(t.adminNote) : ""}</small></div><span class="chip ${sl[1]}">${sl[0]}</span></div>`; }).join("")}</div>` : ""}
+    <div class="h2"><span>سجل المحفظة</span></div>
+    <div class="card">${txs.length ? txs.map((t) => `<div class="row2"><div><b style="color:var(--tx)">${esc(TX_LABEL[t.type] || t.type)}</b><small>${esc(t.createdAt?.toDate ? t.createdAt.toDate().toLocaleDateString("ar-MA") : "")}${t.note ? " · " + esc(t.note) : ""}</small></div><b style="color:${t.amount < 0 ? "var(--red)" : "var(--p)"}" dir="ltr">${t.amount > 0 ? "+" : ""}${money(t.amount)}</b></div>`).join("") : `<div class="empty" style="padding:18px">ما كاين عمليات بعد.</div>`}</div>
+    <div class="h2"><span>آخر التوصيلات</span></div>
+    <div class="card">${done.length ? done.map((d) => `<div class="row2"><div><b style="color:var(--tx)">${esc(orderCode(d.orderId))}</b><small>${esc(niceDate(d.date))}${d.cod ? " · كاش " + money(d.collected) : ""}${d.settledAt ? " · مُسوّى" : ""}</small></div><b>+${money(d.fee)}</b></div>`).join("") : `<div class="empty" style="padding:18px">ما كاين توصيلات بعد.</div>`}</div>`;
+}
+
+/* ───────────── شحن المحفظة (نفس نظام وصولات الزبائن) ───────────── */
+const PAY = [
+  { id: "card", label: "دفع ببطاقة", img: "../img/icons/paiement.webp" },
+  { id: "cih", label: "تطبيق CIH", img: "../img/payments/cih.png" },
+  { id: "fellah", label: "القرض الفلاحي", img: "../img/payments/fellah.jpg" },
+  { id: "cashplus", label: "كاش بلس", img: "../img/payments/cashplus.jpg" },
+  { id: "wafacash", label: "وافا كاش", img: "../img/payments/wafacash.jpg" },
+  { id: "tijari", label: "التجاري وفا بنك", img: "../img/payments/tijari.jpg" },
+  { id: "baridbank", label: "بريد بنك", img: "../img/payments/baridbank.jpg" },
+];
+const payLabel = (id) => PAY.find((p) => p.id === id)?.label || id;
+
+async function openTopup() {
+  if (!Object.keys(S.payCfg).length) { try { const s = await getDoc(doc(db, "config", "paymentMethods")); S.payCfg = s.exists() ? s.data() : {}; } catch (e) {} }
+  const methods = PAY.filter((p) => S.payCfg[p.id]?.enabled !== false);
+  let method = methods[0]?.id || "", file = null;
+  const m = modal("");
+  const mb = m.querySelector(".mb");
+  const draw = () => {
+    const cfg = S.payCfg[method] || {};
+    mb.innerHTML = `<h3>شحن المحفظة</h3>
+      <label class="fld"><span>المبلغ (درهم)</span><input id="tAmt" type="number" inputmode="numeric" min="10" max="50000" placeholder="مثال: 200" value="${esc(mb.dataset.amt || "")}"></label>
+      <div class="seg" style="flex-wrap:wrap">${[100, 200, 500, 1000].map((v) => `<button type="button" data-q="${v}">${v}</button>`).join("")}</div>
+      <div class="h2" style="margin-top:6px"><span>طريقة الدفع</span></div>
+      <div class="paygrid">${methods.map((p) => `<button type="button" class="payopt ${p.id === method ? "on" : ""}" data-m="${p.id}"><img src="${p.img}" alt=""><span>${esc(p.label)}</span></button>`).join("")}</div>
+      ${cfg.rib || cfg.holder || cfg.note ? `<div class="note" style="margin-top:10px"><b>طريقة التحويل</b>
+        ${cfg.rib ? `<div class="copyrow"><div><small>الرقم / RIB</small><b dir="ltr">${esc(cfg.rib)}</b></div><button type="button" class="btn sm ghost" data-copy="${esc(cfg.rib)}">${ic("copy")}</button></div>` : ""}
+        ${cfg.holder ? `<div class="copyrow"><div><small>اسم المستفيد</small><b>${esc(cfg.holder)}</b></div><button type="button" class="btn sm ghost" data-copy="${esc(cfg.holder)}">${ic("copy")}</button></div>` : ""}
+        ${cfg.note ? `<div style="margin-top:6px">${esc(cfg.note)}</div>` : ""}</div>` : ""}
+      <div class="h2" style="margin-top:10px"><span>وصل التحويل</span></div>
+      <label class="upl" id="tUpl">${file ? `<img id="tPrev" alt="">` : `${ic("camera")}<span>صوّر أو اختر صورة الوصل</span>`}<input id="tFile" type="file" accept="image/*" hidden></label>
+      <div id="tErr"></div>
+      <button class="btn" id="tSend" type="button" style="margin-top:12px">${ic("upload")} إرسال الوصل للمراجعة</button>
+      <button class="btn ghost" id="tNo" type="button" style="margin-top:8px">رجوع</button>`;
+    if (file) { const r = new FileReader(); r.onload = () => { const pv = mb.querySelector("#tPrev"); if (pv) pv.src = r.result; }; r.readAsDataURL(file); }
+    mb.querySelector("#tNo").onclick = () => m.remove();
+    mb.querySelectorAll("[data-q]").forEach((b) => (b.onclick = () => { mb.querySelector("#tAmt").value = b.dataset.q; }));
+    mb.querySelectorAll("[data-m]").forEach((b) => (b.onclick = () => { mb.dataset.amt = mb.querySelector("#tAmt").value; method = b.dataset.m; draw(); }));
+    mb.querySelectorAll("[data-copy]").forEach((b) => (b.onclick = async () => { try { await navigator.clipboard.writeText(b.dataset.copy); toast("تم النسخ", "ok"); } catch (e) {} }));
+    mb.querySelector("#tFile").onchange = (e) => { file = e.target.files?.[0] || null; mb.dataset.amt = mb.querySelector("#tAmt").value; draw(); };
+    mb.querySelector("#tSend").onclick = async () => {
+      const err = (t) => (mb.querySelector("#tErr").innerHTML = `<div class="err" style="margin-top:10px">${esc(t)}</div>`);
+      const amount = Number(mb.querySelector("#tAmt").value);
+      if (!(amount >= 10 && amount <= 50000)) return err("المبلغ خاصو يكون بين 10 و 50000 درهم.");
+      if (!method) return err("اختر طريقة الدفع.");
+      if (!file) return err("زيد صورة وصل التحويل.");
+      const btn = mb.querySelector("#tSend"); btn.disabled = true;
+      try {
+        const image = await compressReceiptImage(file);
+        const ref = doc(collection(db, "walletTopups"));
+        const batch = writeBatch(db);
+        batch.set(ref, { driverId: S.user.uid, amount, method, status: "pending", createdAt: serverTimestamp() });
+        batch.set(doc(db, "walletTopupImages", ref.id), { driverId: S.user.uid, image, createdAt: serverTimestamp() });
+        await batch.commit();
+        m.remove(); toast("تم إرسال الوصل، غادي تراجعو الإدارة وتشحن ليك المحفظة", "ok");
+      } catch (e) { btn.disabled = false; err(e?.message === "bad-image" ? "الصورة غير صالحة أو كبيرة بزاف." : errMsg(e)); }
+    };
+  };
+  draw();
 }
 
 function profileHtml() {
@@ -395,10 +474,10 @@ function profileHtml() {
     <label class="fld"><span>وسيلة التوصيل</span><input id="pVeh" value="${esc(m.vehicle || "")}"></label>
     <div class="note" style="margin-bottom:10px">${esc(S.user?.email || "")}</div>
     <button class="btn" id="pSave" type="button">حفظ</button></div>
-  <div class="card"><button class="btn ghost" id="pNotif" type="button" style="margin-bottom:8px">🔔 تفعيل الإشعارات والصوت</button>
-    <button class="btn ghost hide" id="pInstall" type="button" style="margin-bottom:8px">📲 تثبيت التطبيق على الهاتف</button>
-    <a class="btn ghost" id="pSupport" href="#" style="text-decoration:none;margin-bottom:8px">📞 اتصال بإدارة وجبتنا</a>
-    <button class="btn red" id="pOut" type="button">تسجيل الخروج</button></div>
+  <div class="card"><button class="btn ghost" id="pNotif" type="button" style="margin-bottom:8px">${ic("bell")} تفعيل الإشعارات والصوت</button>
+    <button class="btn ghost hide" id="pInstall" type="button" style="margin-bottom:8px">${ic("download")} تثبيت التطبيق على الهاتف</button>
+    <a class="btn ghost" id="pSupport" href="#" style="text-decoration:none;margin-bottom:8px">${ic("phone")} اتصال بإدارة وجبتنا</a>
+    <button class="btn red" id="pOut" type="button">${ic("logout")} تسجيل الخروج</button></div>
   <p class="center" style="color:var(--mut);font-size:12px">وجبتنا — تطبيق السائق v1</p>`;
 }
 
@@ -408,23 +487,25 @@ function renderShell(app) {
   let body = "";
   if (S.tab === "home") body = homeHtml(jobs);
   else if (S.tab === "jobs") body = jobsHtml(jobs);
-  else if (S.tab === "earn") body = earningsHtml();
+  else if (S.tab === "wallet") body = walletHtml();
   else body = profileHtml();
-  const titles = { home: "الرئيسية", jobs: "الطلبات", earn: "الأرباح", me: "حسابي" };
-  app.innerHTML = `${S.offline ? `<div class="offline">⚠️ ما كاينش اتصال بالإنترنت — البيانات ممكن ما تكونش محدّثة</div>` : ""}
-  <div class="shell"><div class="top"><div class="row"><div><h1>${titles[S.tab]}</h1><small>مرحبا ${esc((S.me.name || "").split(" ")[0])} 👋</small></div>
+  const titles = { home: "الرئيسية", jobs: "الطلبات", wallet: "المحفظة", me: "حسابي" };
+  app.innerHTML = `${S.offline ? `<div class="offline">${ic("alert")} ما كاينش اتصال بالإنترنت — البيانات ممكن ما تكونش محدّثة</div>` : ""}
+  <div class="shell"><div class="top"><div class="row"><div><h1>${titles[S.tab]}</h1><small>مرحبا ${esc((S.me.name || "").split(" ")[0])}</small></div>
     <span class="pill ${S.me.online ? "on" : ""}"><i></i>${S.me.online ? "متصل" : "غير متصل"}</span></div></div>
     <div class="main">${body}</div></div>
   <nav class="nav">
-    ${[["home", "🏠", "الرئيسية"], ["jobs", "📋", "الطلبات"], ["earn", "💰", "الأرباح"], ["me", "👤", "حسابي"]]
-      .map(([k, ic, l]) => `<button type="button" data-tab="${k}" class="${S.tab === k ? "on" : ""}"><span class="ic">${ic}</span>${l}${k === "jobs" && todayNew ? `<span class="bdg">${todayNew}</span>` : ""}</button>`).join("")}
+    ${[["home", "home", "الرئيسية"], ["jobs", "clipboard", "الطلبات"], ["wallet", "money", "المحفظة"], ["me", "user", "حسابي"]]
+      .map(([k, icn, l]) => `<button type="button" data-tab="${k}" class="${S.tab === k ? "on" : ""}"><span class="ic">${ic(icn)}</span>${l}${k === "jobs" && todayNew ? `<span class="bdg">${todayNew}</span>` : ""}</button>`).join("")}
   </nav>
   <div id="sheetHost"></div>`;
   app.querySelectorAll("[data-tab]").forEach((b) => (b.onclick = () => { S.tab = b.dataset.tab; render(); window.scrollTo(0, 0); }));
   app.querySelectorAll("[data-open]").forEach((b) => (b.onclick = () => { S.openKey = b.dataset.open; render(); }));
   app.querySelectorAll("[data-seg]").forEach((b) => (b.onclick = () => { S.jobsSeg = b.dataset.seg; render(); }));
   if ($("tgOnline")) $("tgOnline").onclick = toggleOnline;
+  if ($("hWallet")) $("hWallet").onclick = () => { S.tab = "wallet"; render(); };
   if (S.tab === "me") bindProfile();
+  if (S.tab === "wallet" && $("wTopup")) $("wTopup").onclick = openTopup;
   if (S.openKey) renderSheet(jobs.find((j) => j.key === S.openKey));
 }
 
@@ -435,13 +516,13 @@ function bindProfile() {
   $("pOut").onclick = () => signOut(auth);
   $("pNotif").onclick = async () => {
     try { audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)(); audioCtx.resume?.(); beep(); } catch (e) {}
-    if ("Notification" in window) { const r = await Notification.requestPermission(); toast(r === "granted" ? "تم تفعيل الإشعارات ✅" : "الإشعارات غير مفعّلة", r === "granted" ? "ok" : "err"); }
+    if ("Notification" in window) { const r = await Notification.requestPermission(); toast(r === "granted" ? "تم تفعيل الإشعارات" : "الإشعارات غير مفعّلة", r === "granted" ? "ok" : "err"); }
   };
   $("pSave").onclick = async () => {
     const name = $("pName").value.trim(), phone = $("pPhone").value.trim().replace(/\s/g, ""), vehicle = $("pVeh").value.trim();
     if (name.length < 2) return toast("دخل الاسم", "err");
     if (!phoneOk(phone)) return toast("رقم الهاتف غير صحيح", "err");
-    try { await updateDoc(doc(db, "drivers", S.user.uid), { name, phone, vehicle }); toast("تم الحفظ ✓", "ok"); } catch (e) { toast(errMsg(e), "err"); }
+    try { await updateDoc(doc(db, "drivers", S.user.uid), { name, phone, vehicle }); toast("تم الحفظ", "ok"); } catch (e) { toast(errMsg(e), "err"); }
   };
   getDocs(collection(db, "siteLinks")).then((snap) => {
     const tel = snap.docs.map((d) => d.data()).find((l) => l.enabled !== false && /^tel:/.test(l.url || ""));
@@ -462,25 +543,25 @@ function renderSheet(job) {
   const stepOrder = ["assigned", "pickedUp", "arrived", "delivered"];
   const idx = st === "failed" ? 2 : stepOrder.indexOf(st);
   const labels = ["معيّن", "فالطريق", "وصلت", "تم التسليم"];
-  const steps = labels.map((l, i) => `<div class="st ${i < idx || st === "delivered" ? "done" : i === idx ? "cur" : ""}"><div class="dot">${i < idx || st === "delivered" ? "✓" : i + 1}</div>${l}</div>`).join("");
+  const steps = labels.map((l, i) => `<div class="st ${i < idx || st === "delivered" ? "done" : i === idx ? "cur" : ""}"><div class="dot">${i < idx || st === "delivered" ? ic("check") : i + 1}</div>${l}</div>`).join("");
   const items = (o.items || []).map((it) => `<div class="kv"><span>${esc(it.name)}</span><b>×${esc(it.qty)}</b></div>`).join("");
   let cta = "";
   const busy = S.busy ? "disabled" : "";
-  if (st === "assigned") cta = isToday ? `<button class="btn acc" id="aStart" type="button" ${busy}>🛵 استلمت الطلب وانطلقت</button>` : `<button class="btn ghost" type="button" disabled>التوصيل فـ ${esc(niceDate(job.date))}</button>`;
-  else if (st === "pickedUp") cta = `<button class="btn acc" id="aArrive" type="button" ${busy}>📍 وصلت للعنوان</button><button class="btn red sm" id="aFail" type="button" style="align-self:center">تعذر التسليم</button>`;
-  else if (st === "arrived") cta = `<button class="btn" id="aDone" type="button" ${busy}>✅ تم التسليم</button><button class="btn red sm" id="aFail" type="button" style="align-self:center">تعذر التسليم</button>`;
-  const result = st === "delivered" ? `<div class="note">✅ تم التسليم${job.d?.cod ? " — كاش محصّل: <b>" + money(job.d.collected) + "</b>" : ""} · ربحك: <b>${money(job.d?.fee)}</b></div>`
-    : st === "failed" ? `<div class="err">❌ تعذر التسليم: ${esc(job.d?.failReason || "")}</div>` : "";
-  $("sheetHost").innerHTML = `<div class="sheet"><div class="hd"><button id="shClose" type="button" aria-label="رجوع">→</button><b>${esc(orderCode(o.id))} · ${esc(c.name || "")}</b><span class="chip ${STATE_CHIP[st]}">${STATE_LABEL[st]}</span></div>
+  if (st === "assigned") cta = isToday ? `<button class="btn acc" id="aStart" type="button" ${busy}>${ic("scooter")} استلمت الطلب وانطلقت</button>` : `<button class="btn ghost" type="button" disabled>التوصيل فـ ${esc(niceDate(job.date))}</button>`;
+  else if (st === "pickedUp") cta = `<button class="btn acc" id="aArrive" type="button" ${busy}>${ic("pin")} وصلت للعنوان</button><button class="btn red sm" id="aFail" type="button" style="align-self:center">تعذر التسليم</button>`;
+  else if (st === "arrived") cta = `<button class="btn" id="aDone" type="button" ${busy}>${ic("check")} تم التسليم</button><button class="btn red sm" id="aFail" type="button" style="align-self:center">تعذر التسليم</button>`;
+  const result = st === "delivered" ? `<div class="note">${ic("check")} تم التسليم${job.d?.cod ? " — كاش محصّل: <b>" + money(job.d.collected) + "</b>" : ""} · ربحك: <b>${money(job.d?.fee)}</b></div>`
+    : st === "failed" ? `<div class="err">${ic("x")} تعذر التسليم: ${esc(job.d?.failReason || "")}</div>` : "";
+  $("sheetHost").innerHTML = `<div class="sheet"><div class="hd"><button id="shClose" type="button" aria-label="رجوع">${ic("chev")}</button><b>${esc(orderCode(o.id))} · ${esc(c.name || "")}</b><span class="chip ${STATE_CHIP[st]}">${STATE_LABEL[st]}</span></div>
     <div class="bd">
       ${result}
       <div class="steps">${steps}</div>
       <div id="map" class="${coordsOf(c.mapLink) || S.pos ? "" : "hide"}"></div>
       <div class="acts">
-        <a href="tel:${esc(c.phone)}"><span class="ic">📞</span>اتصال</a>
-        <a href="https://wa.me/${esc(waNumber(c.phone))}" target="_blank" rel="noopener"><span class="ic">💬</span>واتساب</a>
-        <a href="${esc(nav.google)}" target="_blank" rel="noopener"><span class="ic">🧭</span>Google Maps</a>
-        <a href="${esc(nav.waze)}" target="_blank" rel="noopener"><span class="ic">🚗</span>Waze</a>
+        <a href="tel:${esc(c.phone)}"><span class="ic">${ic("phone")}</span>اتصال</a>
+        <a href="https://wa.me/${esc(waNumber(c.phone))}" target="_blank" rel="noopener"><span class="ic">${ic("chat")}</span>واتساب</a>
+        <a href="${esc(nav.google)}" target="_blank" rel="noopener"><span class="ic">${ic("map")}</span>Google Maps</a>
+        <a href="${esc(nav.waze)}" target="_blank" rel="noopener"><span class="ic">${ic("car")}</span>Waze</a>
       </div>
       ${cod ? `<div class="cod"><span>حصّل من الزبون عند التسليم</span><b>${money(per)}</b><span>(ثمن اليوم الواحد من ${money(o.total)})</span></div>` : ""}
       <div class="card">
@@ -511,12 +592,12 @@ function setupMap(o) {
   const start = dest || S.pos;
   map = L.map(el, { zoomControl: false, attributionControl: false }).setView([start.lat, start.lng], 14);
   L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19 }).addTo(map);
-  const dot = (emoji) => L.divIcon({ html: `<div style="font-size:26px;line-height:26px;filter:drop-shadow(0 2px 3px #0006)">${emoji}</div>`, className: "", iconSize: [26, 26], iconAnchor: [13, 24] });
-  if (dest) mapMarkers.dest = L.marker([dest.lat, dest.lng], { icon: dot("📍") }).addTo(map);
+  const dot = (name, bg) => L.divIcon({ html: `<div style="width:34px;height:34px;border-radius:50%;background:${bg};color:#fff;display:flex;align-items:center;justify-content:center;font-size:20px;border:3px solid #fff;box-shadow:0 3px 8px #0006">${ic(name)}</div>`, className: "", iconSize: [34, 34], iconAnchor: [17, 17] });
+  if (dest) mapMarkers.dest = L.marker([dest.lat, dest.lng], { icon: dot("pin", "#dc2626") }).addTo(map);
   window.__mapUpdate = () => {
     if (!map || !S.pos) return;
     const ll = [S.pos.lat, S.pos.lng];
-    if (mapMarkers.me) mapMarkers.me.setLatLng(ll); else mapMarkers.me = L.marker(ll, { icon: dot("🛵") }).addTo(map);
+    if (mapMarkers.me) mapMarkers.me.setLatLng(ll); else mapMarkers.me = L.marker(ll, { icon: dot("scooter", "#064e3b") }).addTo(map);
     if (dest && !mapMarkers.fitted) { map.fitBounds([ll, [dest.lat, dest.lng]], { padding: [34, 34], maxZoom: 16 }); mapMarkers.fitted = true; }
   };
   window.__mapUpdate();
@@ -532,7 +613,7 @@ function confirmDeliver(job, per) {
   const cod = !!job.d?.cod || job.order.paymentMethod === "cod";
   const m = modal(`<h3>تأكيد التسليم</h3>
     ${cod ? `<label class="fld"><span>المبلغ الذي حصّلتو من الزبون (د.م.)</span><input id="mAmt" type="number" inputmode="decimal" min="0" value="${per}"></label>` : `<div class="note">الطلب مدفوع مسبقا — ما خاصك تحصّل شي مبلغ.</div>`}
-    <button class="btn" id="mOk" type="button">تأكيد ✅</button><button class="btn ghost" id="mNo" type="button" style="margin-top:8px">رجوع</button>`);
+    <button class="btn" id="mOk" type="button">تأكيد التسليم</button><button class="btn ghost" id="mNo" type="button" style="margin-top:8px">رجوع</button>`);
   m.querySelector("#mNo").onclick = () => m.remove();
   m.querySelector("#mOk").onclick = () => { const v = m.querySelector("#mAmt")?.value; m.remove(); actDeliver(job, v); };
 }
@@ -556,7 +637,7 @@ function startListeners(uid) {
       if (ch.type === "added" && !seen.has(o.id) && !CANCELLED.includes(o.status)) { fresh.push(o); seen.add(o.id); }
     });
     saveSeen(seen);
-    if (fresh.length) { if (fresh.length === 1) newJobAlert(fresh[0]); else { beep(); toast(`${fresh.length} طلبات جديدة معيّنة ليك 🛵`, "ok"); systemNotify("🛵 طلبات جديدة", `${fresh.length} طلبات معيّنة ليك`); } }
+    if (fresh.length) { if (fresh.length === 1) newJobAlert(fresh[0]); else { beep(); toast(`${fresh.length} طلبات جديدة معيّنة ليك`, "ok"); systemNotify("طلبات جديدة", `${fresh.length} طلبات معيّنة ليك`); } }
     firstOrdersSnap = false;
     render();
   }, () => toast("تعذر تحميل الطلبات", "err")));
@@ -573,13 +654,17 @@ function startListeners(uid) {
     if (!changed) return; // تحديثات الموقع فقط: ما نعاودوش رسم الشاشة (باش الخريطة والتمرير ما يتقطعوش)
     syncTracking(); render();
   }, () => {}));
+  // المحفظة: الرصيد + العمليات + طلبات الشحن
+  unsubs.push(onSnapshot(doc(db, "driverWallets", uid), (snap) => { S.wallet = snap.exists() ? snap.data() : null; render(); }, () => {}));
+  unsubs.push(onSnapshot(query(collection(db, "walletTx"), where("driverId", "==", uid)), (snap) => { S.txs = snap.docs.map((d) => ({ id: d.id, ...d.data() })); if (S.tab === "wallet") render(); }, () => {}));
+  unsubs.push(onSnapshot(query(collection(db, "walletTopups"), where("driverId", "==", uid)), (snap) => { S.topups = snap.docs.map((d) => ({ id: d.id, ...d.data() })); if (S.tab === "wallet") render(); }, () => {}));
   freshFee();
 }
 
 let meUnsub = null;
 onAuthStateChanged(auth, (user) => {
   S.user = user; stopListeners(); meUnsub?.(); meUnsub = null;
-  S.orders.clear(); S.deliveries.clear(); S.me = null;
+  S.orders.clear(); S.deliveries.clear(); S.me = null; S.wallet = null; S.txs = []; S.topups = [];
   if (!user) { S.screen = "auth"; syncTracking(); render(); return; }
   S.screen = "loading"; render();
   meUnsub = onSnapshot(doc(db, "drivers", user.uid), (snap) => {
