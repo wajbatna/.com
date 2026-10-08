@@ -28,6 +28,7 @@ import { renderUsersTab, renderPrivacyTab, initAdminExtras } from "./admin-users
 import "./pw-eye.js";
 import { RECEIPT_METHODS } from "./receipts.js";
 import { renderLinksTab, initAdminLinks } from "./admin-links.js";
+import { renderDriversTab, initAdminDrivers, mountAssignDriver } from "./admin-drivers.js";
 
 setPersistence(auth, browserLocalPersistence).catch(() => {});
 
@@ -236,6 +237,7 @@ function renderAdminSidebar() {
     { id: "meals", icon: ico("dejeuner"), label: "الأطباق" },
     { id: "weekly", icon: ico("plan"), label: "الباقة الأسبوعية" },
     { id: "orders", icon: ico("orders"), label: "الطلبات" },
+    { id: "drivers", icon: '<span style="font-size:20px;line-height:1">🛵</span>', label: "السائقون" },
     { id: "users", icon: ico("customers"), label: "المستخدمون / إدارة الحسابات" },
     { id: "privacy", icon: ico("verify"), label: "سياسة الخصوصية" },
     { id: "links", icon: ico("link-other"), label: "روابطنا / مواقعنا" },
@@ -352,6 +354,7 @@ async function switchTab(tab) {
   if (tab === "meals") await renderMealsTab();
   else if (tab === "weekly") await renderWeeklyTab();
   else if (tab === "orders") await renderOrdersTab();
+  else if (tab === "drivers") await renderDriversTab(document.getElementById("adminContent"));
   else if (tab === "users") await renderUsersTab(document.getElementById("adminContent"));
   else if (tab === "privacy") await renderPrivacyTab(document.getElementById("adminContent"));
   else if (tab === "links") await renderLinksTab(document.getElementById("adminContent"));
@@ -774,6 +777,8 @@ function openOrderDetailAdmin(id) {
         : ""
     }
 
+    <div class="order-detail-section" id="adminDriverBox"></div>
+
     <div class="order-detail-section">
       <h4>${ico("order-status")}حالة الطلب</h4>
       <div class="order-detail-row" style="margin-bottom:8px">${orderStatusBadge(o.status)}</div>
@@ -789,6 +794,7 @@ function openOrderDetailAdmin(id) {
   `;
   document.getElementById("backToOrdersBtn").addEventListener("click", renderOrdersTab);
   if (document.getElementById("adminReceiptBox")) renderAdminReceipt(o);
+  mountAssignDriver(document.getElementById("adminDriverBox"), o);
   document.getElementById("editOrderBtn").addEventListener("click", () => openOrderEditAdmin(o.id));
   a.querySelectorAll(".copy-link-btn").forEach((btn) =>
     btn.addEventListener("click", async () => {
@@ -1975,6 +1981,7 @@ function stopAndSendAdminVoiceRecording() {
 
 initAdminExtras({ toast, ico });
 initAdminLinks({ toast });
+initAdminDrivers({ toast });
 Object.assign(window, { setOrdersFilter, login, logout, switchTab, openSidebar, closeSidebar, navTo, logoutFromMenu, togglePaymentEnabled, openImageLightbox, closeImageLightbox });
 document.getElementById("loginForm").addEventListener("submit", login);
 document.getElementById("year").textContent = new Date().getFullYear();

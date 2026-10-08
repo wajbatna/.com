@@ -82,7 +82,8 @@ service cloud.firestore {
         || (docId == 'paymentMethods' && validPaymentMethods(d))
         || (docId == 'loyaltyProgram' && validLoyaltyProgram(d))
         || (docId == 'weeklyPackagePrices' && validWeeklyPackagePrices(d))
-        || (docId == 'privacyPolicy' && validPrivacyPolicyConfig(d));
+        || (docId == 'privacyPolicy' && validPrivacyPolicyConfig(d))
+        || (docId == 'driverSettings' && d.feePerDelivery is number && d.feePerDelivery >= 0 && d.feePerDelivery <= 10000);
     }
 
     // ── سياسة الخصوصية المنشورة (وثيقة واحدة config/privacyPolicy = النسخة الحالية للزبناء) ──
@@ -148,6 +149,7 @@ service cloud.firestore {
     // أي وثيقة أخرى فـ config: الأدمين فقط. الكتابة: الأدمين فقط مع فحص القيم.
     match /config/{docId} {
       allow get: if docId in ['dailyMeal', 'paymentMethods', 'pointsRules', 'loyaltyProgram', 'weeklyPackagePrices', 'privacyPolicy'];
+      allow get: if docId == 'driverSettings' && isActiveDriver();
       allow read: if isAdmin();
       allow create, update: if isAdmin() && validConfig(docId, request.resource.data);
       allow delete: if false;
@@ -270,10 +272,22 @@ service cloud.firestore {
     // • قراءة: الأدمين الكل، والزبون غير طلباتو (where uid == uid).
     // • تعديل: الأدمين، أو الزبون على طلبو هو فقط: حقول التقييم (مرة وحدة) أو الإلغاء (بالشروط فوق).
     // • حذف: الأدمين فقط.
+    // السائق المعيّن (driverId == uid، وحسابو مفعّل) يقرا الطلب ديالو، وفطلبات اليوم الواحد يقدر يبدل الحالة فقط:
+    // خرج للتوصيل / تم التسليم (الطلبات متعددة الأيام كتتتبع بوثائق deliveries).
+    function driverCanMarkOrder() {
+      return isActiveDriver()
+        && resource.data.get('driverId', '') == request.auth.uid
+        && resource.data.schedule.get('dates', []).size() == 1
+        && resource.data.get('status', '') in ['تم قبول الطلب', 'قيد التحضير', 'خرج للتوصيل']
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status'])
+        && request.resource.data.status in ['خرج للتوصيل', 'تم التسليم'];
+    }
+
     match /orders/{orderId} {
-      allow read: if isAdmin() || (isSignedIn() && resource.data.uid == request.auth.uid);
+      allow read: if isAdmin() || (isSignedIn() && resource.data.uid == request.auth.uid)
+        || (isActiveDriver() && resource.data.driverId == request.auth.uid);
       allow create: if isSignedIn() && validOrder(request.resource.data);
-      allow update: if isAdmin() || ownerCanReview() || ownerCanCancel();
+      allow update: if isAdmin() || ownerCanReview() || ownerCanCancel() || driverCanMarkOrder();
       allow delete: if isAdmin();
     }
 
@@ -654,6 +668,106 @@ service cloud.firestore {
       allow list: if isAdmin();
       allow create: if isAdmin() && uid != request.auth.uid && !isAdminUid(uid) && validDeletedUser(request.resource.data);
       allow update, delete: if false;
+    }
+
+    // ───────────── drivers (سائقو التوصيل) ─────────────
+    // السائق كيسجل بنفسو (status = pending)، والأدمين هو لي كيفعّلو (active) ولا يوقفو (suspended).
+    // السائق ما يقدرش يفعّل راسو: status ما كيتبدل إلا من الأدمين.
+    function isActiveDriver() {
+      return request.auth != null
+        && exists(/databases/$(database)/documents/drivers/$(request.auth.uid))
+        && get(/databases/$(database)/documents/drivers/$(request.auth.uid)).data.get('status', '') == 'active';
+    }
+
+    function validLatLng(m) {
+      return m is map
+        && m.lat is number && m.lat >= -90 && m.lat <= 90
+        && m.lng is number && m.lng >= -180 && m.lng <= 180;
+    }
+
+    function validDriverProfile(d) {
+      return d.name is string && d.name.size() >= 2 && d.name.size() <= 100
+        && d.phone is string && d.phone.matches('^(0[5-7][0-9]{8}|[+]212[5-7][0-9]{8})$')
+        && d.get('vehicle', '') is string && d.get('vehicle', '').size() <= 60
+        && d.get('email', '') is string && d.get('email', '').size() <= 254
+        && d.get('online', false) is bool
+        && (d.get('lastLoc', null) == null || validLatLng(d.get('lastLoc', null)));
+    }
+
+    match /drivers/{uid} {
+      allow get: if isOwner(uid) || isAdmin();
+      allow list: if isAdmin();
+      allow create: if isOwner(uid) && !isAdminUid(uid)
+        && request.resource.data.keys().hasOnly(['name', 'phone', 'vehicle', 'email', 'status', 'online', 'createdAt'])
+        && request.resource.data.keys().hasAll(['name', 'phone', 'vehicle', 'status', 'createdAt'])
+        && request.resource.data.status == 'pending'
+        && request.resource.data.get('online', false) == false
+        && request.resource.data.createdAt == request.time
+        && validDriverProfile(request.resource.data);
+      // السائق المفعّل: يبدل بروفايلو + حالة الاتصال + آخر موقع فقط
+      allow update: if (isOwner(uid) && resource.data.status == 'active'
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name', 'phone', 'vehicle', 'online', 'lastLoc', 'lastSeenAt'])
+          && validDriverProfile(request.resource.data)
+          && (!('lastSeenAt' in request.resource.data.diff(resource.data).affectedKeys()) || request.resource.data.lastSeenAt == request.time))
+        || (isAdmin()
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'statusUpdatedAt', 'statusUpdatedBy', 'adminNote'])
+          && request.resource.data.status in ['pending', 'active', 'suspended']
+          && request.resource.data.statusUpdatedAt == request.time
+          && request.resource.data.statusUpdatedBy == request.auth.uid);
+      allow delete: if isAdmin();
+    }
+
+    // ───────────── deliveries (توصيلة = طلب + يوم) ─────────────
+    // معرّف الوثيقة = <orderId>_<YYYY-MM-DD>. السائق المعيّن على الطلب هو لي كيبدا التوصيلة (pickedUp)
+    // وكيحدّثها: arrived → delivered | failed. الزبون كيقرا توصيلاتو (uid) باش يتتبع، والأدمين يقرا ويعدل.
+    function deliveryOrder(orderId) {
+      return get(/databases/$(database)/documents/orders/$(orderId));
+    }
+
+    function validDeliveryCreate(id, d) {
+      return d.keys().hasOnly(['orderId', 'date', 'uid', 'driverId', 'status', 'cod', 'fee', 'driverLoc', 'pickedUpAt', 'createdAt', 'updatedAt'])
+        && d.keys().hasAll(['orderId', 'date', 'uid', 'driverId', 'status', 'cod', 'fee', 'pickedUpAt', 'createdAt', 'updatedAt'])
+        && d.orderId is string && d.date is string && d.date.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+        && id == d.orderId + '_' + d.date
+        && d.driverId == request.auth.uid
+        && exists(/databases/$(database)/documents/orders/$(d.orderId))
+        && deliveryOrder(d.orderId).data.get('driverId', '') == request.auth.uid
+        && deliveryOrder(d.orderId).data.uid == d.uid
+        && d.date in deliveryOrder(d.orderId).data.schedule.get('dates', [])
+        && !(deliveryOrder(d.orderId).data.get('status', '') in ['ملغى من طرف الزبون', 'ملغى من المشرف', 'ملغي'])
+        && d.status == 'pickedUp'
+        && d.cod is bool
+        && d.fee is number
+        && d.fee == (exists(/databases/$(database)/documents/config/driverSettings)
+              ? get(/databases/$(database)/documents/config/driverSettings).data.get('feePerDelivery', 0) : 0)
+        && (!('driverLoc' in d) || validLatLng(d.driverLoc))
+        && d.pickedUpAt == request.time && d.createdAt == request.time && d.updatedAt == request.time;
+    }
+
+    function validDeliveryUpdate() {
+      let d = request.resource.data;
+      let old = resource.data;
+      let keys = d.diff(old).affectedKeys();
+      return old.status in ['pickedUp', 'arrived']
+        && keys.hasOnly(['status', 'arrivedAt', 'deliveredAt', 'failedAt', 'failReason', 'collected', 'driverLoc', 'updatedAt'])
+        && d.updatedAt == request.time
+        && (!('driverLoc' in keys) || validLatLng(d.driverLoc))
+        && (d.status == old.status
+            ? keys.hasOnly(['driverLoc', 'updatedAt'])
+            : (d.status == 'arrived' && old.status == 'pickedUp' && keys.hasOnly(['status', 'arrivedAt', 'driverLoc', 'updatedAt']) && d.arrivedAt == request.time)
+              || (d.status == 'delivered' && keys.hasOnly(['status', 'deliveredAt', 'collected', 'driverLoc', 'updatedAt']) && d.deliveredAt == request.time
+                  && (!('collected' in keys) || (d.collected is number && d.collected >= 0 && d.collected <= 1000000)))
+              || (d.status == 'failed' && keys.hasOnly(['status', 'failedAt', 'failReason', 'driverLoc', 'updatedAt']) && d.failedAt == request.time
+                  && d.failReason is string && d.failReason.size() <= 200));
+    }
+
+    match /deliveries/{deliveryId} {
+      allow read: if isAdmin()
+        || (isSignedIn() && (resource.data.driverId == request.auth.uid || resource.data.uid == request.auth.uid));
+      allow create: if isActiveDriver() && validDeliveryCreate(deliveryId, request.resource.data);
+      allow update: if isAdmin()
+        || (isActiveDriver() && resource.data.driverId == request.auth.uid && validDeliveryUpdate());
+      allow delete: if isAdmin();
     }
 
     // أي مجموعة أخرى (بما فيها أي شيء غير مذكور فوق): ممنوع — الافتراضي فـ Firestore.

@@ -1457,11 +1457,13 @@ async function openMyOrders() {
   await renderMyOrdersList();
 }
 function closeMyOrders() {
+  stopDriverTracking();
   document.getElementById("myOrdersModal").classList.remove("show");
 }
 // كاش بسيط فالذاكرة لطلبات الزبون الحالية (باش زر "التفاصيل" ما يعاودش يقرا Firestore)
 let myOrdersCache = [];
 async function renderMyOrdersList() {
+  stopDriverTracking();
   const s = t(lang);
   const uid = currentUser.uid;
   try {
@@ -1495,7 +1497,46 @@ async function renderMyOrdersList() {
     <div class="modal-head"><h3>${ico("orders")}${s.myOrdersTitle}</h3><button class="close" onclick="closeMyOrders()">${ico("close")}</button></div>
     ${cardsHtml}`;
 }
+/* ═══════ تتبع سائق التوصيل (من وثائق deliveries الخاصة بالزبون) ═══════ */
+let driverTrackUnsub = null;
+function stopDriverTracking() {
+  if (driverTrackUnsub) { try { driverTrackUnsub(); } catch (e) {} driverTrackUnsub = null; }
+}
+const DRIVER_TXT = {
+  ar: { title: "سائق التوصيل", call: "اتصال بالسائق", track: "تتبع السائق على الخريطة", assigned: "تم تعيين سائق لطلبك", pickedUp: "السائق فالطريق إليك 🛵", arrived: "السائق وصل إلى عنوانك 📍", delivered: "تم تسليم طلبك ✅", failed: "تعذر التسليم — تواصل مع الدعم", steps: ["معيّن", "فالطريق", "وصل", "تم التسليم"], today: "توصيلة اليوم", live: "مباشر" },
+  fr: { title: "Livreur", call: "Appeler le livreur", track: "Suivre le livreur sur la carte", assigned: "Un livreur a été assigné à votre commande", pickedUp: "Votre livreur est en route 🛵", arrived: "Votre livreur est arrivé 📍", delivered: "Commande livrée ✅", failed: "Livraison impossible — contactez le support", steps: ["Assigné", "En route", "Arrivé", "Livré"], today: "Livraison du jour", live: "En direct" },
+};
+function mountDriverBlock(o) {
+  const box = document.getElementById("driverBlock");
+  if (!box || !currentUser) return;
+  const dt = DRIVER_TXT[lang] || DRIVER_TXT.ar;
+  const draw = (del) => {
+    const st = del?.status || "assigned";
+    const idx = { assigned: 0, pickedUp: 1, arrived: 2, delivered: 3, failed: 2 }[st];
+    const steps = dt.steps.map((l, i) => `<div style="flex:1;text-align:center;font-size:11px;color:${i <= idx && st !== "failed" ? "#065f46" : "#94a3b8"};font-weight:700"><div style="width:22px;height:22px;border-radius:50%;margin:0 auto 3px;background:${i < idx || st === "delivered" ? "#10b981" : i === idx && st !== "failed" ? "#f59e0b" : "#e2e8f0"};color:#fff;line-height:22px;font-size:12px">${i < idx || st === "delivered" ? "✓" : i + 1}</div>${l}</div>`).join("");
+    const loc = del && (st === "pickedUp" || st === "arrived") && del.driverLoc && del.driverLoc.lat != null
+      ? `https://www.google.com/maps?q=${del.driverLoc.lat},${del.driverLoc.lng}` : "";
+    box.innerHTML = `<h4>🛵 ${dt.title}</h4>
+      <div class="order-detail-row"><b>${escapeHtml(o.driverName || "")}</b>${o.driverPhone ? `<a href="tel:${escapeAttr(o.driverPhone)}" style="text-decoration:none;background:#ecfdf5;color:#047857;border-radius:10px;padding:6px 12px;font-weight:800;font-size:13px">📞 ${dt.call}</a>` : ""}</div>
+      <div style="font-weight:800;margin:8px 0;color:#064e3b">${dt[st]}</div>
+      <div style="display:flex;gap:4px;margin:6px 0 10px">${steps}</div>
+      ${loc ? `<a href="${loc}" target="_blank" rel="noopener" style="display:block;text-align:center;text-decoration:none;background:#064e3b;color:#fff;border-radius:12px;padding:11px;font-weight:800">📍 ${dt.track} <small style="opacity:.8">(${dt.live})</small></a>` : ""}`;
+  };
+  draw(null);
+  const today = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; })();
+  driverTrackUnsub = onSnapshot(
+    query(collection(db, "deliveries"), where("uid", "==", currentUser.uid)),
+    (snap) => {
+      const mine = snap.docs.map((d) => d.data()).filter((d) => d.orderId === o.id);
+      const del = mine.find((d) => d.date === today) || mine.sort((a, b) => b.date.localeCompare(a.date))[0] || null;
+      draw(del);
+    },
+    () => {}
+  );
+}
+
 function openOrderDetail(id) {
+  stopDriverTracking();
   const s = t(lang);
   const o = myOrdersCache.find((x) => x.id === id);
   if (!o) return;
@@ -1515,6 +1556,7 @@ function openOrderDetail(id) {
       <div class="order-detail-row"><span>${s.orderDateLabel}</span><b>${formatDate(o.schedule?.dateFrom || "")}</b></div>
       <button type="button" class="copy-link-btn" data-copy="${escapeAttr(orderCode(o.id))}" onclick="copyOrderNumber(this)" style="margin-top:6px;border:0;background:#f0fdf4;color:#047857;border-radius:10px;padding:6px 12px;font-size:12px;font-weight:800;cursor:pointer">${s.copyOrderNumber}</button>
     </div>
+    ${o.driverId ? `<div class="order-detail-section" id="driverBlock"></div>` : ""}
     <div class="order-detail-section">
       <h4>${ico("location")}${s.deliveryLocationTitle}</h4>
       <div class="order-detail-row"><span>${locLabel}</span></div>
@@ -1541,6 +1583,7 @@ function openOrderDetail(id) {
     ${cancelOrderBlockHtml(o, s)}
   `;
   if (document.getElementById("receiptBlock")) renderReceiptBlock(o.id, "receiptBlock");
+  mountDriverBlock(o);
 }
 
 async function renderRewardsPage() {
