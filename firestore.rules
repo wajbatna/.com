@@ -770,6 +770,59 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    // ───────────── محفظة السائق (driverWallets / walletTx / walletTopups / walletTopupImages) ─────────────
+    // الرصيد كيتبدل غير من الأدمين (موافقة على شحن، تسوية أرباح/كاش، تعديل يدوي). السائق كيطلب الشحن بوصل (نفس نظام وصولات الزبائن).
+    match /driverWallets/{uid} {
+      allow get: if isOwner(uid) || isAdmin();
+      allow list: if isAdmin();
+      allow create, update: if isAdmin()
+        && request.resource.data.keys().hasOnly(['balance', 'updatedAt'])
+        && request.resource.data.balance is number
+        && request.resource.data.updatedAt == request.time;
+      allow delete: if false;
+    }
+
+    match /walletTx/{txId} {
+      allow read: if isAdmin() || (isSignedIn() && resource.data.driverId == request.auth.uid);
+      allow create: if isAdmin()
+        && request.resource.data.keys().hasOnly(['driverId', 'type', 'amount', 'note', 'ref', 'createdAt', 'createdBy'])
+        && request.resource.data.keys().hasAll(['driverId', 'type', 'amount', 'createdAt', 'createdBy'])
+        && request.resource.data.type in ['topup', 'settlement', 'adjust']
+        && request.resource.data.amount is number
+        && request.resource.data.get('note', '') is string && request.resource.data.get('note', '').size() <= 300
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.createdBy == request.auth.uid;
+      allow update, delete: if false;
+    }
+
+    match /walletTopups/{topupId} {
+      allow read: if isAdmin() || (isSignedIn() && resource.data.driverId == request.auth.uid);
+      allow create: if isActiveDriver()
+        && request.resource.data.keys().hasOnly(['driverId', 'amount', 'method', 'status', 'createdAt'])
+        && request.resource.data.driverId == request.auth.uid
+        && request.resource.data.amount is number && request.resource.data.amount >= 10 && request.resource.data.amount <= 50000
+        && request.resource.data.method in ['card', 'cih', 'fellah', 'cashplus', 'wafacash', 'tijari', 'baridbank']
+        && request.resource.data.status == 'pending'
+        && request.resource.data.createdAt == request.time;
+      allow update: if isAdmin()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'adminNote', 'reviewedAt', 'reviewedBy'])
+        && request.resource.data.status in ['pending', 'approved', 'rejected']
+        && request.resource.data.get('adminNote', '') is string && request.resource.data.get('adminNote', '').size() <= 300
+        && request.resource.data.reviewedBy == request.auth.uid;
+      allow delete: if isAdmin();
+    }
+
+    match /walletTopupImages/{topupId} {
+      allow get: if isAdmin() || (isSignedIn() && resource.data.driverId == request.auth.uid);
+      allow list: if isAdmin();
+      allow create: if isActiveDriver()
+        && request.resource.data.keys().hasOnly(['driverId', 'image', 'createdAt'])
+        && request.resource.data.driverId == request.auth.uid
+        && validReceiptImage(request.resource.data.image)
+        && request.resource.data.createdAt == request.time;
+      allow delete: if isAdmin();
+    }
+
     // أي مجموعة أخرى (بما فيها أي شيء غير مذكور فوق): ممنوع — الافتراضي فـ Firestore.
   }
 }
