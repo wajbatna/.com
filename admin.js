@@ -28,7 +28,7 @@ import { renderUsersTab, renderPrivacyTab, initAdminExtras } from "./admin-users
 import "./pw-eye.js";
 import { RECEIPT_METHODS } from "./receipts.js";
 import { renderLinksTab, initAdminLinks } from "./admin-links.js";
-import { renderDriversTab, initAdminDrivers, mountAssignDriver } from "./admin-drivers.js";
+import { renderDriversTab, initAdminDrivers, mountAssignDriver, autoDispatchAfterAccept } from "./admin-drivers.js";
 
 setPersistence(auth, browserLocalPersistence).catch(() => {});
 
@@ -237,7 +237,7 @@ function renderAdminSidebar() {
     { id: "meals", icon: ico("dejeuner"), label: "الأطباق" },
     { id: "weekly", icon: ico("plan"), label: "الباقة الأسبوعية" },
     { id: "orders", icon: ico("orders"), label: "الطلبات" },
-    { id: "drivers", icon: '<span style="font-size:20px;line-height:1">🛵</span>', label: "السائقون" },
+    { id: "drivers", icon: '<img src="img/drv/scooter.png" alt="" style="width:1.35em;height:1.35em;vertical-align:-.3em;object-fit:contain">', label: "السائقون" },
     { id: "users", icon: ico("customers"), label: "المستخدمون / إدارة الحسابات" },
     { id: "privacy", icon: ico("verify"), label: "سياسة الخصوصية" },
     { id: "links", icon: ico("link-other"), label: "روابطنا / مواقعنا" },
@@ -634,6 +634,7 @@ async function acceptOrder(id, btn) {
         /* الطلب تقبل بنجاح حتى لو تعذر إرسال رسالة الدعم التلقائية */
       }
     }
+    autoDispatchAfterAccept(order); // بحث تلقائي عن أقرب سائق بالسداسيات (ما كيوقف حتى شي)
     toast("تم قبول الطلب ✓");
     if (btn) {
       btn.textContent = "✓ تم قبول الطلب";

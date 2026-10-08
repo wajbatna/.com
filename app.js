@@ -1,4 +1,5 @@
 // app.js — منطق الواجهة الأمامية (الزبون) — ثنائي اللغة + حساب + بطاقة العضوية
+import { ic as drvIc } from "./drvicons.js";
 import "./pw-eye.js";
 import { RECEIPT_METHODS, compressReceiptImage } from "./receipts.js";
 import { db, auth } from "./firebase.js";
@@ -1503,8 +1504,8 @@ function stopDriverTracking() {
   if (driverTrackUnsub) { try { driverTrackUnsub(); } catch (e) {} driverTrackUnsub = null; }
 }
 const DRIVER_TXT = {
-  ar: { title: "سائق التوصيل", call: "اتصال بالسائق", track: "تتبع السائق على الخريطة", assigned: "تم تعيين سائق لطلبك", pickedUp: "السائق فالطريق إليك 🛵", arrived: "السائق وصل إلى عنوانك 📍", delivered: "تم تسليم طلبك ✅", failed: "تعذر التسليم — تواصل مع الدعم", steps: ["معيّن", "فالطريق", "وصل", "تم التسليم"], today: "توصيلة اليوم", live: "مباشر" },
-  fr: { title: "Livreur", call: "Appeler le livreur", track: "Suivre le livreur sur la carte", assigned: "Un livreur a été assigné à votre commande", pickedUp: "Votre livreur est en route 🛵", arrived: "Votre livreur est arrivé 📍", delivered: "Commande livrée ✅", failed: "Livraison impossible — contactez le support", steps: ["Assigné", "En route", "Arrivé", "Livré"], today: "Livraison du jour", live: "En direct" },
+  ar: { title: "سائق التوصيل", call: "اتصال بالسائق", track: "تتبع السائق على الخريطة", assigned: "تم تعيين سائق لطلبك", pickedUp: "السائق فالطريق إليك", arrived: "السائق وصل إلى عنوانك", delivered: "تم تسليم طلبك", failed: "تعذر التسليم — تواصل مع الدعم", steps: ["معيّن", "فالطريق", "وصل", "تم التسليم"], today: "توصيلة اليوم", live: "مباشر" },
+  fr: { title: "Livreur", call: "Appeler le livreur", track: "Suivre le livreur sur la carte", assigned: "Un livreur a été assigné à votre commande", pickedUp: "Votre livreur est en route", arrived: "Votre livreur est arrivé", delivered: "Commande livrée", failed: "Livraison impossible — contactez le support", steps: ["Assigné", "En route", "Arrivé", "Livré"], today: "Livraison du jour", live: "En direct" },
 };
 function mountDriverBlock(o) {
   const box = document.getElementById("driverBlock");
@@ -1516,11 +1517,11 @@ function mountDriverBlock(o) {
     const steps = dt.steps.map((l, i) => `<div style="flex:1;text-align:center;font-size:11px;color:${i <= idx && st !== "failed" ? "#065f46" : "#94a3b8"};font-weight:700"><div style="width:22px;height:22px;border-radius:50%;margin:0 auto 3px;background:${i < idx || st === "delivered" ? "#10b981" : i === idx && st !== "failed" ? "#f59e0b" : "#e2e8f0"};color:#fff;line-height:22px;font-size:12px">${i < idx || st === "delivered" ? "✓" : i + 1}</div>${l}</div>`).join("");
     const loc = del && (st === "pickedUp" || st === "arrived") && del.driverLoc && del.driverLoc.lat != null
       ? `https://www.google.com/maps?q=${del.driverLoc.lat},${del.driverLoc.lng}` : "";
-    box.innerHTML = `<h4>🛵 ${dt.title}</h4>
-      <div class="order-detail-row"><b>${escapeHtml(o.driverName || "")}</b>${o.driverPhone ? `<a href="tel:${escapeAttr(o.driverPhone)}" style="text-decoration:none;background:#ecfdf5;color:#047857;border-radius:10px;padding:6px 12px;font-weight:800;font-size:13px">📞 ${dt.call}</a>` : ""}</div>
+    box.innerHTML = `<h4>${drvIc("scooter")} ${dt.title}</h4>
+      <div class="order-detail-row"><b>${escapeHtml(o.driverName || "")}</b>${o.driverPhone ? `<a href="tel:${escapeAttr(o.driverPhone)}" style="text-decoration:none;background:#ecfdf5;color:#047857;border-radius:10px;padding:6px 12px;font-weight:800;font-size:13px">${drvIc("phone")} ${dt.call}</a>` : ""}</div>
       <div style="font-weight:800;margin:8px 0;color:#064e3b">${dt[st]}</div>
       <div style="display:flex;gap:4px;margin:6px 0 10px">${steps}</div>
-      ${loc ? `<a href="${loc}" target="_blank" rel="noopener" style="display:block;text-align:center;text-decoration:none;background:#064e3b;color:#fff;border-radius:12px;padding:11px;font-weight:800">📍 ${dt.track} <small style="opacity:.8">(${dt.live})</small></a>` : ""}`;
+      ${loc ? `<a href="${loc}" target="_blank" rel="noopener" style="display:block;text-align:center;text-decoration:none;background:#064e3b;color:#fff;border-radius:12px;padding:11px;font-weight:800">${drvIc("pin")} ${dt.track} <small style="opacity:.8">(${dt.live})</small></a>` : ""}`;
   };
   draw(null);
   const today = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; })();
