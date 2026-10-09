@@ -174,3 +174,5 @@ button{font-family:inherit;cursor:pointer}
 .cm.me{align-self:flex-start;background:var(--p);border-color:var(--p);color:#fff}
 .crow{display:flex;gap:8px;margin-top:10px}.crow input{flex:1;min-width:0;border:1.5px solid var(--line);border-radius:12px;padding:11px 12px;font-size:15px;font-family:inherit}
 .drv-score .sc-row{display:flex;align-items:baseline;gap:10px}.drv-score .sc-big{font-size:30px;color:#b45309}.drv-score .sc-row span{color:var(--mut);font-weight:700}.drv-score .sc-sub{color:var(--mut);font-size:13px;margin-top:2px}
+
+.jsearch input{width:100%;border:1.5px solid var(--line);border-radius:14px;padding:12px 14px;font:inherit;font-size:15px;background:#fff;margin-bottom:10px;text-transform:uppercase}

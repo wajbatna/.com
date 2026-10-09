@@ -504,10 +504,21 @@ function setOrdersFilter(v) {
   ordersFilter = v;
   renderOrdersTab(true);
 }
+// بحث برقم الطلب: كيقبل "WJ-AB12CD34" أو "ab12" أو جزء منو (بلا حساسية للحروف)
+let ordersSearch = "";
+const normCode = (v) => String(v || "").toUpperCase().replace(/^\s*WJ[-\s]*/, "").replace(/[^A-Z0-9]/g, "");
 function filteredOrders() {
   const f = ORDER_FILTERS.find((x) => x[0] === ordersFilter);
-  if (!f || !f[2]) return ordersCache;
-  return ordersCache.filter((o) => f[2].includes(o.status || "قيد المراجعة"));
+  let list = !f || !f[2] ? ordersCache : ordersCache.filter((o) => f[2].includes(o.status || "قيد المراجعة"));
+  const q = normCode(ordersSearch);
+  if (q) list = list.filter((o) => String(o.id || "").toUpperCase().includes(q));
+  return list;
+}
+function onOrdersSearch(v) {
+  ordersSearch = v;
+  renderOrdersTab(true);
+  const inp = document.getElementById("ordersSearchInp");
+  if (inp) { inp.focus(); const n = inp.value.length; try { inp.setSelectionRange(n, n); } catch (e) {} }
 }
 function cancelInfoHtml(o) {
   if (!o.cancelledAt && o.status !== "ملغى من طرف الزبون") return "";
@@ -534,7 +545,10 @@ async function renderOrdersTab(keepCache) {
   const filterBar = `<div class="admin-card" style="padding:12px 16px"><label style="margin:0 0 6px">تصفية الطلبات حسب الحالة</label>
     <select id="ordersFilterSel" onchange="setOrdersFilter(this.value)">${ORDER_FILTERS.map(
       (f) => `<option value="${f[0]}" ${f[0] === ordersFilter ? "selected" : ""}>${f[1]}</option>`
-    ).join("")}</select></div>`;
+    ).join("")}</select>
+    <label style="margin:12px 0 6px">البحث برقم الطلب</label>
+    <div style="display:flex;gap:8px"><input id="ordersSearchInp" type="search" inputmode="text" autocomplete="off" dir="ltr" placeholder="WJ-XXXXXXXX" value="${escapeAttr(ordersSearch)}" oninput="onOrdersSearch(this.value)" style="flex:1;min-width:0;padding:11px 12px;border:1.5px solid #d6d3d1;border-radius:12px;font:inherit;text-transform:uppercase">${ordersSearch ? `<button type="button" class="btn-outline-sm" onclick="onOrdersSearch('')" aria-label="مسح">✕</button>` : ""}</div>
+    ${ordersSearch ? `<div style="font-size:12px;color:#78716c;margin-top:6px">${visibleOrders.length} نتيجة</div>` : ""}</div>`;
   a.innerHTML = filterBar + (visibleOrders.length
     ? visibleOrders
         .map((o) => {
@@ -588,7 +602,7 @@ async function renderOrdersTab(keepCache) {
    </div></div>`;
         })
         .join("")
-    : `<div class="empty">لا توجد طلبات ${ordersFilter === "all" ? "واردة حالياً" : "بهذه الحالة"}.</div>`);
+    : `<div class="empty">${ordersSearch ? "ما كاين حتى طلب بهاد الرقم." : `لا توجد طلبات ${ordersFilter === "all" ? "واردة حالياً" : "بهذه الحالة"}.`}</div>`);
   a.querySelectorAll("[data-msg]").forEach((btn) => btn.addEventListener("click", () => openThreadFromOrders(btn.dataset.msg)));
   a.querySelectorAll("[data-detail]").forEach((btn) => btn.addEventListener("click", () => openOrderDetailAdmin(btn.dataset.detail)));
   a.querySelectorAll("[data-accept]").forEach((btn) => btn.addEventListener("click", () => acceptOrder(btn.dataset.accept, btn)));
@@ -1983,6 +1997,6 @@ function stopAndSendAdminVoiceRecording() {
 initAdminExtras({ toast, ico });
 initAdminLinks({ toast });
 initAdminDrivers({ toast });
-Object.assign(window, { setOrdersFilter, login, logout, switchTab, openSidebar, closeSidebar, navTo, logoutFromMenu, togglePaymentEnabled, openImageLightbox, closeImageLightbox });
+Object.assign(window, { onOrdersSearch, setOrdersFilter, login, logout, switchTab, openSidebar, closeSidebar, navTo, logoutFromMenu, togglePaymentEnabled, openImageLightbox, closeImageLightbox });
 document.getElementById("loginForm").addEventListener("submit", login);
 document.getElementById("year").textContent = new Date().getFullYear();

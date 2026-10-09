@@ -183,6 +183,8 @@ async function viewReceipt(id) {
 }
 
 /* ───────────── تاب السائقين ───────────── */
+const DJ = { q: "", f: "all", page: 1, open: null, collapsed: false };
+const DJ_PAGE = 15;
 export async function renderDriversTab(el) {
   cleanupHex();
   el.innerHTML = `<div class="empty">جارٍ التحميل...</div>`;
@@ -271,8 +273,19 @@ export async function renderDriversTab(el) {
     <div class="admin-card" style="margin-bottom:12px"><h3 style="margin:0 0 10px">${ic("hex")} خريطة برشيد بالسداسيات</h3><div id="hexBox"></div></div>
     ${topups.length ? `<h4 style="margin:14px 4px 8px">${ic("wallet")} طلبات شحن المحفظة (${topups.length})</h4>${topups.map(topupCard).join("")}` : ""}
     ${pending.length ? `<h4 style="margin:14px 4px 8px">${ic("hourglass")} طلبات التسجيل (${pending.length})</h4>${pending.map(card).join("")}` : ""}
-    <h4 style="margin:14px 4px 8px">السائقون المفعّلون (${active.length})</h4>
-    ${active.length ? active.map(card).join("") : `<div class="empty">ما كاين سائقين مفعّلين بعد. خلّي السائق يسجل من تطبيق السائق، ومن بعد فعّلو من هنا.</div>`}
+    <style>
+      .dj-bar{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0}.dj-bar input{flex:1;min-width:150px;padding:10px 12px;border:1.5px solid #d6d3d1;border-radius:12px;font:inherit}
+      .dj-chips{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px}.dj-chips button{border:1.5px solid #d6d3d1;background:#fff;border-radius:20px;padding:6px 12px;font:inherit;font-size:12.5px;font-weight:700;cursor:pointer}.dj-chips button.on{background:#064e3b;border-color:#064e3b;color:#fff}
+      .dj-row{display:flex;align-items:center;gap:8px;padding:10px 4px;border-bottom:1px solid #eee;cursor:pointer;font-size:13px}.dj-row b{font-size:14px}
+      .dj-dot{width:10px;height:10px;border-radius:50%;background:#cbd5e1;flex:none}.dj-dot.on{background:#10b981;box-shadow:0 0 0 3px #10b98133}
+      .dj-meta{margin-inline-start:auto;display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;color:#64748b;font-size:12px}.dj-chev{transition:transform .2s;color:#94a3b8}.dj-row.open .dj-chev{transform:rotate(90deg)}
+      .dj-exp{padding:6px 0 10px}.dj-more{display:block;width:100%;margin-top:10px;border:1.5px dashed #a8a29e;background:none;border-radius:12px;padding:10px;font:inherit;font-weight:800;cursor:pointer;color:#57534e}
+    </style>
+    <details class="admin-card" id="djBox" style="margin-top:14px" ${DJ.collapsed ? "" : "open"}>
+      <summary style="cursor:pointer;font-weight:900;font-size:15px;list-style:none;display:flex;justify-content:space-between;align-items:center;gap:8px"><span>${ic("scooter")} المنضمّون (${active.length})</span><span style="font-size:12px;color:#047857;font-weight:800">${active.filter(isOnline).length} متصل الآن</span></summary>
+      ${active.length ? `<div class="dj-bar"><input id="djQ" type="search" placeholder="ابحث بالاسم أو الهاتف أو البريد..." value="${esc(DJ.q)}"></div>
+      <div class="dj-chips" id="djChips"></div><div id="djList"></div>` : `<div class="empty">ما كاين سائقين منضمّين بعد. خلّي السائق يسجل من تطبيق السائق، ومن بعد فعّلو من هنا.</div>`}
+    </details>
     ${susp.length ? `<h4 style="margin:14px 4px 8px">الموقوفون (${susp.length})</h4>${susp.map(card).join("")}` : ""}
     <h4 style="margin:14px 4px 8px">آخر التوصيلات</h4>
     <div class="admin-card">${recent.length ? recent.map((d) => `<div style="display:flex;justify-content:space-between;gap:8px;padding:8px 0;border-bottom:1px solid #eee;font-size:13px">
@@ -281,6 +294,30 @@ export async function renderDriversTab(el) {
 
   mountHexMap(el.querySelector("#hexBox"));
   const again = () => renderDriversTab(el);
+  const FILTERS = [["all", "الكل"], ["online", "متصل"], ["offline", "غير متصل"], ["cash", "عليهم كاش"], ["low", "رصيد سالب"]];
+  const drawJoined = () => {
+    const box = el.querySelector("#djList"); if (!box) return;
+    const q = DJ.q.trim().toLowerCase();
+    let list = active.filter((d) => !q || [d.name, d.phone, d.email, d.vehicle].some((v) => String(v || "").toLowerCase().includes(q)));
+    if (DJ.f === "online") list = list.filter(isOnline);
+    else if (DJ.f === "offline") list = list.filter((d) => !isOnline(d));
+    else if (DJ.f === "cash") list = list.filter((d) => stat(d.id).cashDue > 0);
+    else if (DJ.f === "low") list = list.filter((d) => (Number(wallets[d.id]?.balance) || 0) < 0);
+    list = [...list].sort((a, b) => (isOnline(b) ? 1 : 0) - (isOnline(a) ? 1 : 0) || String(a.name || "").localeCompare(String(b.name || ""), "ar"));
+    const shown = list.slice(0, DJ.page * DJ_PAGE);
+    el.querySelector("#djChips").innerHTML = FILTERS.map(([k, l]) => `<button type="button" data-f="${k}" class="${DJ.f === k ? "on" : ""}">${l}</button>`).join("");
+    box.innerHTML = (shown.length ? shown.map((d) => {
+      const s = stat(d.id), r = rate(d.id), bal = Number(wallets[d.id]?.balance) || 0, open = DJ.open === d.id;
+      return `<div class="dj-row ${open ? "open" : ""}" data-dj="${d.id}"><span class="dj-dot ${isOnline(d) ? "on" : ""}"></span><b>${esc(d.name || "—")}</b>
+        <span class="dj-meta"><span>اليوم ${s.todayN}</span>${r.n ? `<span>★ ${r.avg.toFixed(1)}</span>` : ""}<span style="color:${bal < 0 ? "#dc2626" : "#065f46"}">${money(bal)}</span></span><span class="dj-chev">›</span></div>${open ? `<div class="dj-exp">${card(d)}</div>` : ""}`;
+    }).join("") : `<div class="empty">ما كاين نتائج.</div>`)
+      + (list.length > shown.length ? `<button type="button" class="dj-more" id="djMore">عرض المزيد (${list.length - shown.length})</button>` : "")
+      + `<div style="font-size:12px;color:#78716c;margin-top:8px;text-align:center">${shown.length} من ${list.length}</div>`;
+    el.querySelectorAll("#djChips [data-f]").forEach((b) => (b.onclick = () => { DJ.f = b.dataset.f; DJ.page = 1; drawJoined(); }));
+    el.querySelectorAll("[data-dj]").forEach((b) => (b.onclick = () => { DJ.open = DJ.open === b.dataset.dj ? null : b.dataset.dj; drawJoined(); }));
+    const more = el.querySelector("#djMore"); if (more) more.onclick = () => { DJ.page++; drawJoined(); };
+    bindCardActions();
+  };
   const guard = (fn, okMsg) => async (e) => { try { await fn(e); if (okMsg) ctx.toast(okMsg); again(); } catch (err) {
     if (err?.message === "cancel") return;
     ctx.toast(err?.message === "already" ? "الطلب تعالج من قبل" : err?.message === "bad" ? "قيمة غير صحيحة" : "تعذرت العملية", "error");
@@ -291,17 +328,12 @@ export async function renderDriversTab(el) {
     try { await setDoc(doc(db, "config", "driverSettings"), { feePerDelivery: v, updatedAt: serverTimestamp() }, { merge: true }); ctx.toast("تم حفظ الأتعاب"); }
     catch (e) { ctx.toast("تعذر الحفظ (تأكد من نشر القواعد الجديدة)", "error"); }
   };
+  const bindCardActions = () => {
   el.querySelectorAll("[data-set]").forEach((b) => (b.onclick = guard(async () => {
     const [id, status] = b.dataset.set.split("|");
     await updateDoc(doc(db, "drivers", id), { status, statusUpdatedAt: serverTimestamp(), statusUpdatedBy: auth.currentUser.uid });
   }, "تم تحديث الحالة")));
   el.querySelectorAll("[data-del]").forEach((b) => (b.onclick = guard(async () => { if (!confirm("حذف سجل هاد السائق نهائيا؟")) throw new Error("cancel"); await deleteDoc(doc(db, "drivers", b.dataset.del)); })));
-  el.querySelectorAll("[data-receipt]").forEach((b) => (b.onclick = () => viewReceipt(b.dataset.receipt).catch(() => ctx.toast("تعذر فتح الوصل", "error"))));
-  el.querySelectorAll("[data-tok]").forEach((b) => (b.onclick = guard(async () => { const t = topups.find((x) => x.id === b.dataset.tok); b.disabled = true; await approveTopup(t); }, "تم شحن المحفظة")));
-  el.querySelectorAll("[data-trej]").forEach((b) => (b.onclick = guard(async () => {
-    const note = prompt("سبب الرفض (يبان للسائق):", "الوصل غير واضح"); if (note === null) throw new Error("cancel");
-    await updateDoc(doc(db, "walletTopups", b.dataset.trej), { status: "rejected", adminNote: note.slice(0, 300), reviewedAt: serverTimestamp(), reviewedBy: auth.currentUser.uid });
-  }, "تم رفض الطلب")));
   el.querySelectorAll("[data-settle]").forEach((b) => (b.onclick = guard(async () => { await settleDriver(drivers.find((d) => d.id === b.dataset.settle)); })));
   el.querySelectorAll("[data-adjust]").forEach((b) => (b.onclick = guard(async () => {
     const v = prompt("المبلغ (موجب = إضافة للمحفظة، سالب = خصم). مثال: 150 أو -80"); if (v === null) throw new Error("cancel");
@@ -309,6 +341,20 @@ export async function renderDriversTab(el) {
     const note = prompt("ملاحظة (مثلا: دفع أرباح نقدا):", "") ?? "";
     await applyWallet(b.dataset.adjust, amount, "adjust", note.slice(0, 300), "");
   }, "تم تعديل الرصيد")));
+  };
+  bindCardActions();
+  {
+    const dq = el.querySelector("#djQ");
+    if (dq) dq.oninput = () => { DJ.q = dq.value; DJ.page = 1; drawJoined(); };
+    const box = el.querySelector("#djBox"); if (box) box.addEventListener("toggle", () => { DJ.collapsed = !box.open; });
+    drawJoined();
+  }
+  el.querySelectorAll("[data-receipt]").forEach((b) => (b.onclick = () => viewReceipt(b.dataset.receipt).catch(() => ctx.toast("تعذر فتح الوصل", "error"))));
+  el.querySelectorAll("[data-tok]").forEach((b) => (b.onclick = guard(async () => { const t = topups.find((x) => x.id === b.dataset.tok); b.disabled = true; await approveTopup(t); }, "تم شحن المحفظة")));
+  el.querySelectorAll("[data-trej]").forEach((b) => (b.onclick = guard(async () => {
+    const note = prompt("سبب الرفض (يبان للسائق):", "الوصل غير واضح"); if (note === null) throw new Error("cancel");
+    await updateDoc(doc(db, "walletTopups", b.dataset.trej), { status: "rejected", adminNote: note.slice(0, 300), reviewedAt: serverTimestamp(), reviewedBy: auth.currentUser.uid });
+  }, "تم رفض الطلب")));
 }
 
 /* ───────────── قسم السائق داخل تفاصيل الطلب ───────────── */

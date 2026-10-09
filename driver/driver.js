@@ -151,9 +151,10 @@ function newJobAlert(o) {
 }
 
 /* ───────────── الموقع المباشر ───────────── */
-let watchId = null, lastDeliveryPush = 0, lastDriverPush = 0, wakeLock = null;
+let watchId = null, lastDeliveryPush = 0, lastLivePush = 0, lastDriverPush = 0, wakeLock = null;
 function hasActiveDelivery() { for (const d of S.deliveries.values()) if (isActive(d.status)) return true; return false; }
-function wantTracking() { return !!S.me && S.me.status === "active" && (S.me.online || hasActiveDelivery()); }
+function hasTodayJob() { const t = todayStr(); for (const o of S.orders.values()) if (!CANCELLED.includes(o.status) && o.status !== "تم التسليم" && (o.schedule?.dates || []).includes(t)) return true; return false; }
+function wantTracking() { return !!S.me && S.me.status === "active" && (S.me.online || hasActiveDelivery() || hasTodayJob()); }
 function syncTracking() {
   if (wantTracking()) {
     if (watchId == null && "geolocation" in navigator) {
@@ -180,6 +181,15 @@ function pushLocation(force) {
       if (!isActive(d.status)) continue;
       lastDeliveryPush = now;
       updateDoc(doc(db, "deliveries", d.id), { driverLoc: loc, updatedAt: serverTimestamp() }).catch(() => {});
+    }
+  }
+  if (force || now - lastLivePush > 8000) { // موقع مباشر لكل طلب معيّن لليوم → الزبون يشوفو فالخريطة قبل ما ينطلق حتى
+    lastLivePush = now;
+    const today = todayStr();
+    for (const o of S.orders.values()) {
+      if (CANCELLED.includes(o.status) || o.status === "تم التسليم" || !o.uid) continue;
+      if (!(o.schedule?.dates || []).includes(today)) continue;
+      setDoc(doc(db, "driverLive", `${o.id}_${S.user.uid}`), { orderId: o.id, uid: o.uid, driverId: S.user.uid, lat: loc.lat, lng: loc.lng, at: now, updatedAt: serverTimestamp() }).catch(() => {});
     }
   }
   if (S.me.online && (force || now - lastDriverPush > 5000)) {
@@ -372,15 +382,17 @@ function homeHtml(jobs) {
 function jobsHtml(jobs) {
   const today = todayStr();
   const seg = S.jobsSeg;
-  const list = jobs.filter((j) => seg === "today" ? j.date === today && !(j.state === "delivered" || j.state === "failed") || isActive(j.state)
+  const jq = String(S.jobQ || "").toUpperCase().replace(/^\s*WJ[-\s]*/, "").replace(/[^A-Z0-9]/g, "");
+  const list = jq ? jobs.filter((j) => String(j.order.id).toUpperCase().includes(jq)) : jobs.filter((j) => seg === "today" ? j.date === today && !(j.state === "delivered" || j.state === "failed") || isActive(j.state)
     : seg === "upcoming" ? j.date > today && j.state === "assigned"
     : j.state === "delivered" || j.state === "failed");
   const doneSorted = seg === "done" ? [...list].sort((a, b) => b.date.localeCompare(a.date)) : list;
   const seen = new Set(); const uniq = doneSorted.filter((j) => (seen.has(j.key) ? false : seen.add(j.key)));
-  return `<div class="seg"><button data-seg="today" class="${seg === "today" ? "on" : ""}" type="button">اليوم</button>
+  const searchBox = `<div class="jsearch"><input id="jobQ" type="search" dir="ltr" autocomplete="off" placeholder="ابحث برقم الطلب (WJ-…)" value="${esc(S.jobQ || "")}"></div>`;
+  return searchBox + `<div class="seg"><button data-seg="today" class="${seg === "today" ? "on" : ""}" type="button">اليوم</button>
     <button data-seg="upcoming" class="${seg === "upcoming" ? "on" : ""}" type="button">القادمة</button>
     <button data-seg="done" class="${seg === "done" ? "on" : ""}" type="button">المنجزة</button></div>
-    ${uniq.length ? uniq.map(jobCard).join("") : `<div class="empty"><div class="em">${ic(seg === "done" ? "clipboard" : "scooter")}</div>${seg === "today" ? "ما كاين طلبات لليوم." : seg === "upcoming" ? "ما كاين طلبات قادمة." : "ما كاين توصيلات منجزة بعد."}</div>`}`;
+    ${uniq.length ? uniq.map(jobCard).join("") : `<div class="empty"><div class="em">${ic(seg === "done" ? "clipboard" : "scooter")}</div>${jq ? "ما كاين طلب بهاد الرقم." : seg === "today" ? "ما كاين طلبات لليوم." : seg === "upcoming" ? "ما كاين طلبات قادمة." : "ما كاين توصيلات منجزة بعد."}</div>`}`;
 }
 
 const TOPUP_STATUS = { pending: ["قيد المراجعة", "y"], approved: ["تمت الموافقة", "g"], rejected: ["مرفوض", "r"] };
@@ -547,6 +559,8 @@ function renderShell(app) {
   S.navPop = null;
   app.querySelectorAll("[data-tab]").forEach((b) => (b.onclick = () => { if (S.tab !== b.dataset.tab && navigator.vibrate) navigator.vibrate(8); S.navPop = b.dataset.tab; S.tab = b.dataset.tab; render(); window.scrollTo(0, 0); }));
   app.querySelectorAll("[data-open]").forEach((b) => (b.onclick = () => { S.openKey = b.dataset.open; render(); }));
+  const jqEl = $("jobQ");
+  if (jqEl) jqEl.oninput = () => { S.jobQ = jqEl.value; render(); const n = $("jobQ"); if (n) { n.focus(); try { n.setSelectionRange(n.value.length, n.value.length); } catch (e) {} } };
   app.querySelectorAll("[data-seg]").forEach((b) => (b.onclick = () => { S.jobsSeg = b.dataset.seg; render(); }));
   if ($("tgOnline")) $("tgOnline").onclick = toggleOnline;
   if ($("hWallet")) $("hWallet").onclick = () => { S.tab = "wallet"; render(); };

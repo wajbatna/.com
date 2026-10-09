@@ -490,6 +490,7 @@ function openSidebar() {
   document.getElementById("menuBtn").setAttribute("aria-expanded", "true");
   syncBodyScrollLock();
   setTimeout(() => sb.querySelector(".side-item, .sidebar-close")?.focus(), 50);
+  setTimeout(() => moveSideLiquid(sb.querySelector(".side-item")), 380);
 }
 function closeSidebar() {
   const sb = document.getElementById("sidebar");
@@ -612,8 +613,35 @@ function renderSidebar() {
     <span class="side-label">${account.text}</span>
   </button>`);
 
-  body.innerHTML = items.join("");
+  body.innerHTML = `<span class="side-liquid" id="sideLiquid" aria-hidden="true"></span>` + items.join("");
   syncSupportBadgeUI();
+  wireSidebarLiquid();
+}
+// التبويب السائل: كينزلق لـ العنصر اللي لمستيه/مرّيتي عليه، وملي تضغط كينزلق عليه وبعدها كيتنفذ الإجراء
+function moveSideLiquid(item) {
+  const body = document.getElementById("sidebarBody"), liq = document.getElementById("sideLiquid");
+  if (!body || !liq || !item) return;
+  const b = body.getBoundingClientRect(), r = item.getBoundingClientRect();
+  liq.style.height = r.height + "px";
+  liq.style.transform = `translateY(${r.top - b.top + body.scrollTop}px)`;
+  liq.classList.add("on");
+  body.querySelectorAll(".side-item").forEach((el) => el.classList.toggle("lq", el === item));
+}
+function wireSidebarLiquid() {
+  const body = document.getElementById("sidebarBody"); if (!body) return;
+  body.querySelectorAll(".side-item").forEach((it) => {
+    const go = () => moveSideLiquid(it);
+    it.addEventListener("pointerenter", go);
+    it.addEventListener("focus", go);
+    it.addEventListener("touchstart", go, { passive: true });
+    it.addEventListener("click", (e) => {
+      if (it.dataset.go === "1") { delete it.dataset.go; return; }
+      if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+      e.stopImmediatePropagation(); e.preventDefault();
+      moveSideLiquid(it);
+      setTimeout(() => { it.dataset.go = "1"; it.click(); }, 240);
+    }, true);
+  });
 }
 // نبقيو الاسم القديم شغال (كيتصاوب عليه نداء فبزاف ديال الأماكن) وكيدير تحديث القائمة الجانبية
 function updateAccountButton() {
@@ -1476,8 +1504,24 @@ async function renderMyOrdersList() {
     document.getElementById("myOrdersContent").innerHTML = `<div class="modal-head"><h3>${ico("orders")}${s.myOrdersTitle}</h3><button class="close" onclick="closeMyOrders()">${ico("close")}</button></div><div class="empty" style="padding:30px">${s.orderError}</div>`;
     return;
   }
-  const cardsHtml = myOrdersCache.length
-    ? myOrdersCache
+  myOrdersQ = "";
+  const cardsHtml = myOrderCardsHtml(myOrdersCache, s);
+  document.getElementById("myOrdersContent").innerHTML = `
+    <div class="modal-head"><h3>${ico("orders")}${s.myOrdersTitle}</h3><button class="close" onclick="closeMyOrders()">${ico("close")}</button></div>
+    ${myOrdersCache.length ? `<div class="ord-search"><input id="myOrdersSearch" type="search" dir="ltr" autocomplete="off" placeholder="${escapeAttr(lang === "fr" ? "Rechercher par n° de commande (WJ-…)" : "ابحث برقم الطلب (WJ-…)")}" oninput="filterMyOrders(this.value)"></div>` : ""}
+    <div id="myOrdersCards">${cardsHtml}</div>`;
+}
+let myOrdersQ = "";
+function filterMyOrders(v) {
+  myOrdersQ = v;
+  const q = String(v || "").toUpperCase().replace(/^\s*WJ[-\s]*/, "").replace(/[^A-Z0-9]/g, "");
+  const list = q ? myOrdersCache.filter((o) => String(o.id).toUpperCase().includes(q)) : myOrdersCache;
+  const box = document.getElementById("myOrdersCards");
+  if (box) box.innerHTML = list.length ? myOrderCardsHtml(list, t(lang)) : `<div class="empty" style="padding:30px">${lang === "fr" ? "Aucune commande avec ce numéro." : "ما كاين حتى طلب بهاد الرقم."}</div>`;
+}
+function myOrderCardsHtml(list, s) {
+  return list.length
+    ? list
         .map(
           (o) => `
       <div class="order-card">
@@ -1494,15 +1538,13 @@ async function renderMyOrdersList() {
         )
         .join("")
     : `<div class="empty" style="padding:30px">${s.noOrdersYet}</div>`;
-  document.getElementById("myOrdersContent").innerHTML = `
-    <div class="modal-head"><h3>${ico("orders")}${s.myOrdersTitle}</h3><button class="close" onclick="closeMyOrders()">${ico("close")}</button></div>
-    ${cardsHtml}`;
 }
 /* ═══════ تتبع سائق التوصيل: خريطة مباشرة + مراسلة + تقييم (من وثائق deliveries الخاصة بالزبون) ═══════ */
-let driverTrackUnsub = null, driverChatUnsub = null, driverMap = null, driverMapMk = {}, driverAgeTimer = null;
+let driverTrackUnsub = null, driverLiveUnsub = null, driverChatUnsub = null, driverMap = null, driverMapMk = {}, driverAgeTimer = null;
 function stopDriverTracking() {
   if (driverTrackUnsub) { try { driverTrackUnsub(); } catch (e) {} driverTrackUnsub = null; }
   if (driverChatUnsub) { try { driverChatUnsub(); } catch (e) {} driverChatUnsub = null; }
+  if (driverLiveUnsub) { try { driverLiveUnsub(); } catch (e) {} driverLiveUnsub = null; }
   if (driverAgeTimer) { clearInterval(driverAgeTimer); driverAgeTimer = null; }
   try { driverMap?.remove(); } catch (e) {}
   driverMap = null; driverMapMk = {};
@@ -1513,14 +1555,14 @@ const DRIVER_TXT = {
 };
 const DRV2 = {
   ar: {
-    chat: "مراسلة السائق", chatPh: "اكتب رسالة للسائق…", send: "إرسال", chatEmpty: "ابدأ المحادثة مع سائقك", chatClosed: "المحادثة مغلقة بعد انتهاء الطلب", chatErr: "تعذر إرسال الرسالة",
+    chat: "مراسلة السائق", chatPh: "اكتب رسالة للسائق…", send: "إرسال", chatEmpty: "ابدأ المحادثة مع سائقك", chatClosed: "المحادثة مغلقة بعد انتهاء الطلب", chatErr: "تعذر إرسال الرسالة", loadErr: "تعذر تحميل البيانات — تأكد من نشر قواعد Firestore الجديدة", waitLoc: "بانتظار موقع السائق… (يظهر عندما يفتح السائق تطبيقه ويفعّل الموقع)",
     ageNow: "الآن", ageSec: (n) => `قبل ${n} ث`, ageMin: (n) => `قبل ${n} د`, liveLbl: "موقع السائق مباشر", rateDriver: "قيّم السائق", rated: "شكراً على تقييمك",
     rateTitle: "كيف كان توصيلك؟", rateSub: (n) => (n ? `قيّم السائق ${n}` : "قيّم سائق التوصيل"), qPolite: "هل كان السائق معكم مهذباً؟", qMoney: "هل طلب منكم زيادة مال؟",
     yes: "نعم", no: "لا", comment: "ملاحظة (اختياري)", submit: "إرسال التقييم", later: "لاحقاً", thanks: "شكراً لك! تقييمك كيعاوننا نحسّنو الخدمة", rateErr: "تعذر إرسال التقييم، حاول مرة أخرى",
     starLbl: ["سيئ", "ضعيف", "مقبول", "جيد", "ممتاز"],
   },
   fr: {
-    chat: "Écrire au livreur", chatPh: "Écrivez un message…", send: "Envoyer", chatEmpty: "Démarrez la conversation avec votre livreur", chatClosed: "Conversation fermée après la livraison", chatErr: "Message non envoyé",
+    chat: "Écrire au livreur", chatPh: "Écrivez un message…", send: "Envoyer", chatEmpty: "Démarrez la conversation avec votre livreur", chatClosed: "Conversation fermée après la livraison", chatErr: "Message non envoyé", loadErr: "Chargement impossible — publiez les nouvelles règles Firestore", waitLoc: "En attente de la position du livreur…",
     ageNow: "à l'instant", ageSec: (n) => `il y a ${n} s`, ageMin: (n) => `il y a ${n} min`, liveLbl: "Position du livreur en direct", rateDriver: "Noter le livreur", rated: "Merci pour votre avis",
     rateTitle: "Comment s'est passée la livraison ?", rateSub: (n) => (n ? `Notez le livreur ${n}` : "Notez votre livreur"), qPolite: "Le livreur a-t-il été poli ?", qMoney: "A-t-il demandé de l'argent en plus ?",
     yes: "Oui", no: "Non", comment: "Commentaire (facultatif)", submit: "Envoyer l'avis", later: "Plus tard", thanks: "Merci ! Votre avis nous aide à améliorer le service", rateErr: "Envoi impossible, réessayez",
@@ -1538,7 +1580,7 @@ function mountDriverBlock(o) {
   const chatClosed = CHAT_CLOSED_STATUS.includes(o.status);
   box.innerHTML = `<h4>${drvIc("scooter")} ${dt.title}</h4>
     <div id="drvInfo"></div>
-    <div id="drvMapWrap" class="hide"><div class="drv-live"><i></i>${dt.liveLbl}<span id="drvAge"></span></div><div id="drvMap" class="drv-map"></div></div>
+    <div id="drvMapWrap" class="hide"><div class="drv-live"><i></i>${dt.liveLbl}<span id="drvAge"></span></div><div class="drv-mapbox"><div id="drvMap" class="drv-map"></div><div id="drvWait" class="drv-wait hide">${dt.waitLoc}</div></div><div id="drvErr" class="drv-err hide">${dt.loadErr}</div></div>
     <button type="button" id="drvChatBtn" class="drv-chat-btn">${drvIc("chat")} ${dt.chat}<i class="drv-dot hide" id="drvDot"></i></button>
     <div id="drvChat" class="hide"></div>`;
   let lastDel = null, msgs = [], chatShown = false;
@@ -1566,33 +1608,43 @@ function mountDriverBlock(o) {
 
   /* — الخريطة الحية — */
   const dot = (name, bg) => L.divIcon({ className: "", html: `<div style="width:36px;height:36px;border-radius:50%;background:${bg};color:#fff;display:flex;align-items:center;justify-content:center;border:3px solid #fff;box-shadow:0 3px 8px #0006">${drvIc(name)}</div>`, iconSize: [36, 36], iconAnchor: [18, 18] });
+  let liveLoc = null; // موقع من driverLive (من وقت التعيين)
+  const curLoc = () => {
+    const dl = lastDel && (lastDel.status === "pickedUp" || lastDel.status === "arrived") ? lastDel.driverLoc : null;
+    const cands = [dl, liveLoc].filter((x) => x && x.lat != null && x.lng != null && Date.now() - (x.at || 0) < 20 * 60 * 1000);
+    return cands.sort((a, b) => (b.at || 0) - (a.at || 0))[0] || null;
+  };
   const ageTxt = () => {
-    const at = lastDel?.driverLoc?.at; if (!at) return "";
+    const at = curLoc()?.at; if (!at) return "";
     const sec = Math.max(0, Math.round((Date.now() - at) / 1000));
     return " · " + (sec < 8 ? dt.ageNow : sec < 90 ? dt.ageSec(sec) : dt.ageMin(Math.round(sec / 60)));
   };
-  const updateMap = (del) => {
-    const live = del && (del.status === "pickedUp" || del.status === "arrived") && del.driverLoc && del.driverLoc.lat != null;
+  const updateMap = () => {
     const wrap = q("drvMapWrap");
-    if (!live) { wrap.classList.add("hide"); return; }
+    const done = chatClosed || lastDel?.status === "delivered" || lastDel?.status === "failed";
+    const loc = curLoc();
+    if (done || (!loc && !dest)) { wrap.classList.add("hide"); return; }
     wrap.classList.remove("hide");
     q("drvAge").textContent = ageTxt();
-    const ll = [del.driverLoc.lat, del.driverLoc.lng];
-    if (!window.L) { q("drvMap").innerHTML = `<a href="https://www.google.com/maps?q=${ll[0]},${ll[1]}" target="_blank" rel="noopener" style="display:block;padding:14px;text-align:center;font-weight:800">${dt.track}</a>`; return; }
+    q("drvWait").classList.toggle("hide", !!loc);
+    const ll = loc ? [loc.lat, loc.lng] : null;
+    if (!window.L) { if (ll) q("drvMap").innerHTML = `<a href="https://www.google.com/maps?q=${ll[0]},${ll[1]}" target="_blank" rel="noopener" style="display:block;padding:14px;text-align:center;font-weight:800">${dt.track}</a>`; return; }
     if (!driverMap) {
-      driverMap = L.map(q("drvMap"), { zoomControl: false, attributionControl: true }).setView(ll, 15);
+      driverMap = L.map(q("drvMap"), { zoomControl: false, attributionControl: true }).setView(ll || [dest.lat, dest.lng], 15);
       driverMap.attributionControl.setPrefix(false);
       L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "© OpenStreetMap" }).addTo(driverMap);
       if (dest) driverMapMk.dest = L.marker([dest.lat, dest.lng], { icon: dot("pin", "#dc2626") }).addTo(driverMap);
       setTimeout(() => driverMap && driverMap.invalidateSize(), 250);
     }
-    if (driverMapMk.me) driverMapMk.me.setLatLng(ll); else driverMapMk.me = L.marker(ll, { icon: dot("scooter", "#064e3b") }).addTo(driverMap);
-    if (!driverMapMk.fitted) {
-      if (dest) driverMap.fitBounds([ll, [dest.lat, dest.lng]], { padding: [36, 36], maxZoom: 16 }); else driverMap.setView(ll, 15);
-      driverMapMk.fitted = true;
+    if (ll) {
+      if (driverMapMk.me) driverMapMk.me.setLatLng(ll); else driverMapMk.me = L.marker(ll, { icon: dot("scooter", "#064e3b") }).addTo(driverMap);
+      if (!driverMapMk.fitted) {
+        if (dest) driverMap.fitBounds([ll, [dest.lat, dest.lng]], { padding: [36, 36], maxZoom: 16 }); else driverMap.setView(ll, 15);
+        driverMapMk.fitted = true;
+      }
     }
   };
-  driverAgeTimer = setInterval(() => { const a = q("drvAge"); if (a && lastDel) a.textContent = ageTxt(); }, 10000);
+  driverAgeTimer = setInterval(() => { const a = q("drvAge"); if (a) a.textContent = ageTxt(); }, 10000);
 
   /* — المراسلة — */
   const tsOf = (m) => (m.createdAt?.toMillis ? m.createdAt.toMillis() : Date.now());
@@ -1613,8 +1665,8 @@ function mountDriverBlock(o) {
     try { await addDoc(collection(db, "orderChats"), { orderId: o.id, uid: currentUser.uid, driverId: o.driverId, from: "customer", text, createdAt: serverTimestamp() }); }
     catch (e) { inp.value = text; toast(dt.chatErr, "error"); }
   };
-  q("drvChatBtn").onclick = () => {
-    chatShown = !chatShown;
+  const toggleChat = (force) => {
+    chatShown = typeof force === "boolean" ? force : !chatShown;
     const c = q("drvChat");
     c.classList.toggle("hide", !chatShown);
     if (chatShown) {
@@ -1624,13 +1676,16 @@ function mountDriverBlock(o) {
       if (q("drvSend")) { q("drvSend").onclick = send; q("drvMsgIn").onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); send(); } }; }
     }
   };
+  q("drvChatBtn").onclick = () => toggleChat();
   driverChatUnsub = onSnapshot(
     query(collection(db, "orderChats"), where("uid", "==", currentUser.uid), where("orderId", "==", o.id)),
     (snap) => {
       msgs = snap.docs.map((d) => ({ id: d.id, ...d.data() })).sort((a, b) => tsOf(a) - tsOf(b));
-      if (chatShown) { renderMsgs(); markSeen(); } else refreshDot();
+      if (chatShown) { renderMsgs(); markSeen(); }
+      else if (driverCount() > seen) toggleChat(true); // رسالة جديدة من السائق → تنفتح المحادثة تلقائيا
+      else refreshDot();
     },
-    () => {}
+    (e) => { console.warn("orderChats", e); const c = q("drvChat"); c.classList.remove("hide"); c.innerHTML = `<div class="drv-err">${dt.loadErr}</div>`; }
   );
 
   draw(null);
@@ -1642,10 +1697,20 @@ function mountDriverBlock(o) {
       const del = mine.find((d) => d.date === today) || mine.sort((a, b) => b.date.localeCompare(a.date))[0] || null;
       lastDel = del;
       draw(del);
-      updateMap(del);
+      updateMap();
     },
-    () => {}
+    (e) => { console.warn("deliveries", e); q("drvErr")?.classList.remove("hide"); q("drvMapWrap")?.classList.remove("hide"); }
   );
+  driverLiveUnsub = onSnapshot(
+    query(collection(db, "driverLive"), where("uid", "==", currentUser.uid), where("orderId", "==", o.id)),
+    (snap) => {
+      const mine = snap.docs.map((d) => d.data()).filter((d) => d.driverId === o.driverId).sort((a, b) => (b.at || 0) - (a.at || 0))[0];
+      liveLoc = mine ? { lat: mine.lat, lng: mine.lng, at: mine.at } : null;
+      updateMap();
+    },
+    (e) => { console.warn("driverLive", e); q("drvErr")?.classList.remove("hide"); q("drvMapWrap")?.classList.remove("hide"); }
+  );
+  updateMap();
 }
 
 /* ═══════ تقييم السائق بعد التسليم (نجوم + مهذب؟ + طلب زيادة مال؟) ═══════ */
@@ -3318,7 +3383,7 @@ function renewSubscription() {
 }
 
 /* ---------- تعريض الدوال للـ HTML (الملف عبارة عن module) ---------- */
-Object.assign(window, {
+Object.assign(window, { filterMyOrders,
   orderWeeklyPack,
   setCategory,
   add,
