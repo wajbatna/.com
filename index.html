@@ -25,12 +25,42 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js" defer></script>
   <style>
+    .ord-search input{width:100%;border:1.5px solid #e2e8f0;border-radius:12px;padding:11px 14px;font:inherit;font-size:15px;margin:2px 0 10px;text-transform:uppercase;background:#fff}
+
+    /* ═══ زر القائمة المتحرك (3 شرائط ⇄ ✕ داخل دائرة) + تبويب سائل ينزلق بين عناصر القائمة ═══ */
+    .burger{overflow:visible;display:block}
+    .burger .bc{stroke-dasharray:1 1;stroke-dashoffset:1;opacity:0;transform-box:fill-box;transform-origin:center;transform:rotate(-90deg);transition:stroke-dashoffset .55s cubic-bezier(.6,0,.2,1) .12s,transform .75s cubic-bezier(.5,0,.2,1) .1s,opacity .01s .12s}
+    .burger line{transform-box:fill-box;transform-origin:center;transition:transform .5s cubic-bezier(.7,0,.2,1),opacity .2s}
+    .burger .b1{transform:translateY(-6.5px)}.burger .b3{transform:translateY(6.5px)}
+    #menuBtn[aria-expanded="true"] .burger .bc,.sidebar.show .burger .bc{stroke-dashoffset:0;opacity:1;transform:rotate(270deg)}
+    #menuBtn[aria-expanded="true"] .burger .b1,.sidebar.show .burger .b1{transform:translateY(0) rotate(45deg) scaleX(.6)}
+    #menuBtn[aria-expanded="true"] .burger .b3,.sidebar.show .burger .b3{transform:translateY(0) rotate(-45deg) scaleX(.6)}
+    #menuBtn[aria-expanded="true"] .burger .b2,.sidebar.show .burger .b2{opacity:0;transform:scaleX(0)}
+    #sidebar.sidebar{background:linear-gradient(180deg,var(--primary-dark),#022c22)}
+    #sidebar .sidebar-close{background:none!important;width:auto;height:auto;padding:4px}
+    #sidebar .sidebar-body{position:relative;padding:14px 0 14px 0;gap:4px}
+    #sidebar .side-item{position:relative;z-index:1;color:#d1fae5cc;background:none!important;border-radius:0;padding-inline:20px 16px;transition:color .25s}
+    #sidebar .side-item.lq{color:var(--primary-dark)}
+    #sidebar .side-item .side-icon{transition:transform .3s cubic-bezier(.34,1.56,.64,1)}#sidebar .side-item.lq .side-icon{transform:scale(1.12)}
+    .side-liquid{position:absolute;z-index:0;top:0;inset-inline-start:0;inset-inline-end:12px;height:56px;background:#f2f7f1;border-start-end-radius:30px;border-end-end-radius:30px;opacity:0;pointer-events:none;transition:transform .42s cubic-bezier(.6,-.15,.25,1.15),height .3s,opacity .25s}
+    .side-liquid.on{opacity:1}
+    .side-liquid::before,.side-liquid::after{content:"";position:absolute;inset-inline-start:0;width:22px;height:22px;pointer-events:none}
+    .side-liquid::before{top:-22px;background:radial-gradient(circle at 100% 0,transparent 21.5px,#f2f7f1 22px)}
+    .side-liquid::after{bottom:-22px;background:radial-gradient(circle at 100% 100%,transparent 21.5px,#f2f7f1 22px)}
+    html[dir="rtl"] .side-liquid::before{background:radial-gradient(circle at 0 0,transparent 21.5px,#f2f7f1 22px)}
+    html[dir="rtl"] .side-liquid::after{background:radial-gradient(circle at 0 100%,transparent 21.5px,#f2f7f1 22px)}
+    html[dir="rtl"] .side-liquid{border-start-end-radius:0;border-end-end-radius:0;border-start-start-radius:0;border-end-start-radius:0}
+    html[dir="rtl"] .side-liquid{border-radius:30px 0 0 30px}
+    html:not([dir="rtl"]) .side-liquid{border-radius:0 30px 30px 0}
+    @media (prefers-reduced-motion:reduce){.burger *,.side-liquid,.side-item,.side-item .side-icon{transition:none!important}}
     /* خريطة السائق + مراسلته + تقييمه */
     .drv-live{display:flex;align-items:center;gap:6px;font-size:12px;font-weight:800;color:#047857;margin:4px 0 6px}
     .drv-live i{width:9px;height:9px;border-radius:50%;background:#10b981;box-shadow:0 0 0 0 #10b98199;animation:drvPulse 1.6s infinite}
     .drv-live span{color:#64748b;font-weight:700}
     @keyframes drvPulse{70%{box-shadow:0 0 0 9px #10b98100}100%{box-shadow:0 0 0 0 #10b98100}}
     .drv-map{height:220px;border-radius:14px;overflow:hidden;border:1px solid #e2e8f0;margin-bottom:10px;position:relative;z-index:0}
+    .drv-mapbox{position:relative}.drv-wait{position:absolute;inset-inline:10px;bottom:20px;z-index:500;background:#fffbeb;color:#92400e;border:1px solid #fde68a;border-radius:12px;padding:8px 12px;font-size:13px;font-weight:700;text-align:center}.drv-wait.hide,.drv-err.hide{display:none}
+    .drv-err{background:#fef2f2;color:#991b1b;border:1px solid #fecaca;border-radius:12px;padding:9px 12px;font-size:13px;font-weight:700;margin:6px 0}
     .drv-chat-btn{position:relative;display:flex;align-items:center;justify-content:center;gap:8px;width:100%;border:0;border-radius:12px;padding:11px;background:#ecfdf5;color:#047857;font:inherit;font-weight:800;cursor:pointer;margin-top:4px}
     .drv-dot{position:absolute;top:8px;inset-inline-end:12px;width:11px;height:11px;border-radius:50%;background:#dc2626;border:2px solid #fff}
     .drv-dot.hide,#drvChat.hide,#drvMapWrap.hide{display:none}
@@ -505,7 +535,7 @@
         <button type="button" class="lang-btn" data-lang="fr" onclick="switchLang('fr')" aria-label="Français"><img class="flag-icon" src="https://flagcdn.com/w40/fr.png" width="18" height="13" alt="" loading="lazy"> FR</button>
       </div>
       <button type="button" class="icon-btn" id="headerCartBtn" onclick="goToCart()" data-i18n-aria="cartAria" aria-label="عرض السلة"><img src="img/icons/panier.webp" alt="" width="22" height="22" style="width:22px;height:22px;object-fit:contain"><span class="cart-count" id="headerCartCount">0</span></button>
-      <button type="button" class="icon-btn" id="menuBtn" onclick="openSidebar()" data-i18n-aria="menuAria" aria-label="فتح القائمة" aria-haspopup="dialog" aria-expanded="false" aria-controls="sidebar">☰<span class="menu-dot" id="menuDot"></span></button>
+      <button type="button" class="icon-btn" id="menuBtn" onclick="openSidebar()" data-i18n-aria="menuAria" aria-label="فتح القائمة" aria-haspopup="dialog" aria-expanded="false" aria-controls="sidebar"><svg class="burger" viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle class="bc" cx="12" cy="12" r="10.4" pathLength="1"/><line class="b1" x1="5" y1="12" x2="19" y2="12"/><line class="b2" x1="5" y1="12" x2="19" y2="12"/><line class="b3" x1="5" y1="12" x2="19" y2="12"/></svg><span class="menu-dot" id="menuDot"></span></button>
     </div>
   </div>
 </header>
@@ -514,7 +544,7 @@
 <aside class="sidebar" id="sidebar" role="dialog" aria-modal="true" data-i18n-aria="sidebarAria" aria-label="القائمة الجانبية" aria-hidden="true">
   <div class="sidebar-head">
     <b>وجبتنا</b>
-    <button type="button" class="sidebar-close" onclick="closeSidebar()" data-i18n-aria="closeAria" aria-label="إغلاق"><img src="img/icons/close.webp" alt="" width="24" height="24" style="width:1.35em;height:1.35em;object-fit:contain"></button>
+    <button type="button" class="sidebar-close" onclick="closeSidebar()" data-i18n-aria="closeAria" aria-label="إغلاق"><svg class="burger" viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle class="bc" cx="12" cy="12" r="10.4" pathLength="1"/><line class="b1" x1="5" y1="12" x2="19" y2="12"/><line class="b2" x1="5" y1="12" x2="19" y2="12"/><line class="b3" x1="5" y1="12" x2="19" y2="12"/></svg></button>
   </div>
   <div class="sidebar-body" id="sidebarBody"></div>
 </aside>
