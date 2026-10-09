@@ -862,13 +862,44 @@ service cloud.firestore {
         && exists(/databases/$(database)/documents/orders/$(request.resource.data.orderId))
         && chatOrderData(request.resource.data.orderId).uid == request.resource.data.uid
         && chatOrderData(request.resource.data.orderId).get('driverId', '') == request.resource.data.driverId
-        && chatOrderData(request.resource.data.orderId).get('status', '') in ['تم قبول الطلب', 'قيد التحضير', 'خرج للتوصيل']
+        && !(chatOrderData(request.resource.data.orderId).get('status', '') in ['تم التسليم', 'ملغى من طرف الزبون', 'ملغى من المشرف', 'ملغي'])
         && (
           (request.resource.data.from == 'customer' && request.auth.uid == request.resource.data.uid)
           || (request.resource.data.from == 'driver' && request.auth.uid == request.resource.data.driverId && isActiveDriver())
         );
       allow update: if false;
       allow delete: if isAdmin();
+    }
+
+    // ───────────── موقع السائق المباشر لطلب معيّن (driverLive) ─────────────
+    // السائق المعيّن كيكتب موقعو (كل ~8 ثواني) من وقت التعيين حتى يتسلّم الطلب، والزبون صاحب الطلب كيقراه ويشوفو فالخريطة.
+    // معرّف الوثيقة = <orderId>_<driverId> باش تبدّل السائق ما تتلخبطش.
+    match /driverLive/{liveId} {
+      allow read: if isAdmin() || (isSignedIn() && (resource.data.uid == request.auth.uid || resource.data.driverId == request.auth.uid));
+      allow create: if isActiveDriver()
+        && request.resource.data.keys().hasOnly(['orderId', 'uid', 'driverId', 'lat', 'lng', 'at', 'updatedAt'])
+        && request.resource.data.keys().hasAll(['orderId', 'uid', 'driverId', 'lat', 'lng', 'at', 'updatedAt'])
+        && request.resource.data.driverId == request.auth.uid
+        && request.resource.data.orderId is string
+        && liveId == request.resource.data.orderId + '_' + request.auth.uid
+        && request.resource.data.lat is number && request.resource.data.lat >= -90 && request.resource.data.lat <= 90
+        && request.resource.data.lng is number && request.resource.data.lng >= -180 && request.resource.data.lng <= 180
+        && request.resource.data.at is number
+        && request.resource.data.updatedAt == request.time
+        && exists(/databases/$(database)/documents/orders/$(request.resource.data.orderId))
+        && get(/databases/$(database)/documents/orders/$(request.resource.data.orderId)).data.get('driverId', '') == request.auth.uid
+        && get(/databases/$(database)/documents/orders/$(request.resource.data.orderId)).data.uid == request.resource.data.uid;
+      allow update: if isActiveDriver()
+        && resource.data.driverId == request.auth.uid
+        && request.resource.data.keys().hasOnly(['orderId', 'uid', 'driverId', 'lat', 'lng', 'at', 'updatedAt'])
+        && request.resource.data.driverId == request.auth.uid
+        && request.resource.data.uid == resource.data.uid
+        && request.resource.data.orderId == resource.data.orderId
+        && request.resource.data.lat is number && request.resource.data.lat >= -90 && request.resource.data.lat <= 90
+        && request.resource.data.lng is number && request.resource.data.lng >= -180 && request.resource.data.lng <= 180
+        && request.resource.data.at is number
+        && request.resource.data.updatedAt == request.time;
+      allow delete: if isAdmin() || (isSignedIn() && resource.data.driverId == request.auth.uid);
     }
 
     // ───────────── تقييم السائق (driverReviews) ─────────────
