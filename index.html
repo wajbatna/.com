@@ -22,6 +22,39 @@
   <title>وجبتنا — أكل بيتي مغربي أصيل</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js" defer></script>
+  <style>
+    /* خريطة السائق + مراسلته + تقييمه */
+    .drv-live{display:flex;align-items:center;gap:6px;font-size:12px;font-weight:800;color:#047857;margin:4px 0 6px}
+    .drv-live i{width:9px;height:9px;border-radius:50%;background:#10b981;box-shadow:0 0 0 0 #10b98199;animation:drvPulse 1.6s infinite}
+    .drv-live span{color:#64748b;font-weight:700}
+    @keyframes drvPulse{70%{box-shadow:0 0 0 9px #10b98100}100%{box-shadow:0 0 0 0 #10b98100}}
+    .drv-map{height:220px;border-radius:14px;overflow:hidden;border:1px solid #e2e8f0;margin-bottom:10px;position:relative;z-index:0}
+    .drv-chat-btn{position:relative;display:flex;align-items:center;justify-content:center;gap:8px;width:100%;border:0;border-radius:12px;padding:11px;background:#ecfdf5;color:#047857;font:inherit;font-weight:800;cursor:pointer;margin-top:4px}
+    .drv-dot{position:absolute;top:8px;inset-inline-end:12px;width:11px;height:11px;border-radius:50%;background:#dc2626;border:2px solid #fff}
+    .drv-dot.hide,#drvChat.hide,#drvMapWrap.hide{display:none}
+    .drv-msgs{display:flex;flex-direction:column;gap:6px;max-height:230px;min-height:90px;overflow-y:auto;padding:10px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;margin-top:8px}
+    .drv-m{max-width:82%;padding:7px 12px;border-radius:14px;font-size:14px;line-height:1.55;word-break:break-word;background:#fff;border:1px solid #e2e8f0;align-self:flex-end}
+    .drv-m.me{align-self:flex-start;background:#064e3b;color:#fff;border-color:#064e3b}
+    .drv-chat-empty,.drv-chat-closed{text-align:center;color:#64748b;font-size:13px;padding:14px 6px}
+    .drv-chat-row{display:flex;gap:6px;margin-top:8px}
+    .drv-chat-row input{flex:1;min-width:0;border:1.5px solid #e2e8f0;border-radius:12px;padding:10px 12px;font:inherit;font-size:14px}
+    .drv-chat-row button{border:0;border-radius:12px;padding:0 16px;background:#f59e0b;color:#3b2400;font:inherit;font-weight:800;cursor:pointer}
+    .drv-rate-btn{display:block;width:100%;border:0;border-radius:12px;padding:11px;background:#f59e0b;color:#3b2400;font:inherit;font-weight:800;cursor:pointer;margin-bottom:6px}
+    .drv-rated{text-align:center;color:#b45309;font-weight:800;margin-bottom:6px}
+    .drv-rate-who{display:flex;align-items:center;justify-content:center;gap:8px;margin:6px 0 4px;color:#064e3b}
+    .drv-stars{display:flex;justify-content:center;gap:2px;margin-top:6px}
+    .drv-stars button{border:0;background:none;font-size:42px;line-height:1;padding:0 3px;min-width:46px;min-height:46px;color:#d1d5db;cursor:pointer;transition:transform .15s,color .15s}
+    .drv-stars button.on{color:#f59e0b}.drv-stars button:active{transform:scale(1.25)}
+    .drv-star-lbl{text-align:center;font-weight:800;color:#b45309;min-height:22px;margin-bottom:8px}
+    .drv-q{font-weight:800;margin:12px 0 6px;color:#0f172a}
+    .drv-yn{display:flex;gap:8px}
+    .drv-yn button{flex:1;border:1.5px solid #e2e8f0;background:#fff;border-radius:12px;padding:11px;font:inherit;font-weight:800;color:#475569;cursor:pointer}
+    .drv-yn button.on{background:#064e3b;border-color:#064e3b;color:#fff}
+    #drvRateTxt{width:100%;margin-top:12px;border:1.5px solid #e2e8f0;border-radius:12px;padding:10px 12px;font:inherit;resize:none}
+    #drvRateGo:disabled{opacity:.5}
+  </style>
   <link rel="stylesheet" href="ai/assistant.css">
   <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800;900&display=swap" rel="stylesheet">
   <style>

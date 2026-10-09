@@ -2,7 +2,7 @@
 // مرتبط بنفس مشروع Firebase: orders (الطلبات المعيّنة) + deliveries (حالة كل توصيلة) + drivers (البروفايل/الاتصال).
 import { db, auth } from "../firebase.js";
 import {
-  collection, doc, getDoc, getDocs, setDoc, updateDoc, onSnapshot, query, where, serverTimestamp, writeBatch,
+  collection, doc, getDoc, getDocs, setDoc, addDoc, updateDoc, onSnapshot, query, where, serverTimestamp, writeBatch,
 } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
 import {
   createUserWithEmailAndPassword, signInWithEmailAndPassword, onAuthStateChanged,
@@ -66,7 +66,7 @@ const S = {
   user: null, me: null, screen: "loading", authTab: "login",
   tab: "home", jobsSeg: "today", openKey: null,
   orders: new Map(), deliveries: new Map(), fee: 0,
-  wallet: null, txs: [], topups: [], payCfg: {},
+  wallet: null, txs: [], topups: [], payCfg: {}, chats: new Map(), reviews: [], navPop: null,
   pos: null, busy: false, offline: !navigator.onLine,
 };
 let unsubs = [];
@@ -493,9 +493,27 @@ async function openTopup() {
   draw();
 }
 
+/* ───────────── أيقونات الشريط السفلي (خطّية متحركة) ───────────── */
+const NAV_SVG = (() => {
+  const w = (inner) => `<svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${inner}</svg>`;
+  const P = (d) => `<path pathLength="1" d="${d}"/>`;
+  return {
+    home: w(P("M3.5 11 12 3.8l8.5 7.2v8.2a1.8 1.8 0 0 1-1.8 1.8H15v-6.2H9V21H5.3a1.8 1.8 0 0 1-1.8-1.8z")),
+    jobs: w(P("M6 3.5h12a1 1 0 0 1 1 1V21l-2.4-1.6L14.2 21l-2.2-1.6L9.8 21l-2.4-1.6L5 21V4.5a1 1 0 0 1 1-1z") + P("M9 8.5h6M9 12h6M9 15.5h3.5")),
+    wallet: w(P("M19.5 8V6.2a1.7 1.7 0 0 0-1.7-1.7H5.5A2.5 2.5 0 0 0 3 7v10.3A2.2 2.2 0 0 0 5.2 19.5h12.6a1.7 1.7 0 0 0 1.7-1.7V9.7A1.7 1.7 0 0 0 17.8 8H5.5A2.5 2.5 0 0 1 3 5.6") + `<circle pathLength="1" cx="16" cy="13.8" r="1.1"/>`),
+    me: w(`<circle pathLength="1" cx="12" cy="8" r="3.6"/>` + P("M4.8 20.2c.5-3.7 3.3-5.7 7.2-5.7s6.7 2 7.2 5.7z")),
+  };
+})();
+
 function profileHtml() {
   const m = S.me;
-  return `<div class="card"><div class="h2"><span>بياناتي</span></div>
+  const rv = S.reviews, n = rv.length;
+  const avg = n ? rv.reduce((a, r) => a + (Number(r.stars) || 0), 0) / n : 0;
+  const polite = n ? Math.round((rv.filter((r) => r.polite).length / n) * 100) : 0;
+  const ratingCard = `<div class="card drv-score"><div class="h2"><span>تقييمات الزبناء</span></div>${n
+    ? `<div class="sc-row"><b class="sc-big">★ ${avg.toFixed(1)}</b><span>${n} تقييم</span></div><div class="sc-sub">مهذب عند ${polite}% من الزبناء</div>`
+    : `<div class="empty" style="padding:12px">ما كاين تقييمات بعد.</div>`}</div>`;
+  return ratingCard + `<div class="card"><div class="h2"><span>بياناتي</span></div>
     <label class="fld"><span>الاسم</span><input id="pName" value="${esc(m.name)}"></label>
     <label class="fld"><span>الهاتف</span><input id="pPhone" type="tel" value="${esc(m.phone)}"></label>
     <label class="fld"><span>وسيلة التوصيل</span><input id="pVeh" value="${esc(m.vehicle || "")}"></label>
@@ -522,11 +540,12 @@ function renderShell(app) {
     <span class="pill ${S.me.online ? "on" : ""}"><i></i>${S.me.online ? "متصل" : "غير متصل"}</span></div></div>
     <div class="main">${body}</div></div>
   <nav class="nav">
-    ${[["home", "home", "الرئيسية"], ["jobs", "clipboard", "الطلبات"], ["wallet", "money", "المحفظة"], ["me", "user", "حسابي"]]
-      .map(([k, icn, l]) => `<button type="button" data-tab="${k}" class="${S.tab === k ? "on" : ""}"><span class="ic">${ic(icn)}</span>${l}${k === "jobs" && todayNew ? `<span class="bdg">${todayNew}</span>` : ""}</button>`).join("")}
+    ${[["home", "الرئيسية"], ["jobs", "الطلبات"], ["wallet", "المحفظة"], ["me", "حسابي"]]
+      .map(([k, l]) => `<button type="button" data-tab="${k}" class="${S.tab === k ? "on" : ""}${S.navPop === k ? " pop" : ""}" aria-label="${l}"><span class="ni">${NAV_SVG[k]}</span><span class="nl">${l}</span>${k === "jobs" && todayNew ? `<span class="bdg">${todayNew}</span>` : ""}</button>`).join("")}
   </nav>
   <div id="sheetHost"></div>`;
-  app.querySelectorAll("[data-tab]").forEach((b) => (b.onclick = () => { S.tab = b.dataset.tab; render(); window.scrollTo(0, 0); }));
+  S.navPop = null;
+  app.querySelectorAll("[data-tab]").forEach((b) => (b.onclick = () => { if (S.tab !== b.dataset.tab && navigator.vibrate) navigator.vibrate(8); S.navPop = b.dataset.tab; S.tab = b.dataset.tab; render(); window.scrollTo(0, 0); }));
   app.querySelectorAll("[data-open]").forEach((b) => (b.onclick = () => { S.openKey = b.dataset.open; render(); }));
   app.querySelectorAll("[data-seg]").forEach((b) => (b.onclick = () => { S.jobsSeg = b.dataset.seg; render(); }));
   if ($("tgOnline")) $("tgOnline").onclick = toggleOnline;
@@ -559,6 +578,48 @@ function bindProfile() {
   }).catch(() => { $("pSupport")?.classList.add("hide"); });
 }
 
+/* ───────────── مراسلة الزبون ───────────── */
+const CHAT_OPEN_STATUS = ["تم قبول الطلب", "قيد التحضير", "خرج للتوصيل"];
+const chatMsgsOf = (orderId) => [...S.chats.values()].filter((m) => m.orderId === orderId).sort((a, b) => (a.createdAt?.toMillis ? a.createdAt.toMillis() : Date.now()) - (b.createdAt?.toMillis ? b.createdAt.toMillis() : Date.now()));
+const seenKeyOf = (orderId) => "drvSeen_" + orderId;
+function chatUnread(orderId) {
+  let seen = 0; try { seen = Number(localStorage.getItem(seenKeyOf(orderId))) || 0; } catch (e) {}
+  return chatMsgsOf(orderId).filter((m) => m.from === "customer").length > seen;
+}
+let chatCtx = null; // { el, orderId, order }
+function chatMark(orderId) {
+  const n = chatMsgsOf(orderId).filter((m) => m.from === "customer").length;
+  try { localStorage.setItem(seenKeyOf(orderId), String(n)); } catch (e) {}
+}
+function renderChatList() {
+  if (!chatCtx) return;
+  const list = chatCtx.el.querySelector("#cMsgs"); if (!list) return;
+  const ms = chatMsgsOf(chatCtx.orderId);
+  list.innerHTML = ms.length ? ms.map((m) => `<div class="cm ${m.from === "driver" ? "me" : ""}">${esc(m.text)}</div>`).join("") : `<div class="empty" style="padding:18px">ابدأ المحادثة مع الزبون.</div>`;
+  list.scrollTop = list.scrollHeight;
+  chatMark(chatCtx.orderId);
+}
+function openChat(job) {
+  const o = job.order, closed = !CHAT_OPEN_STATUS.includes(o.status);
+  const m = modal(`<h3>${ic("chat")} ${esc(o.customer?.name || "الزبون")}</h3>
+    <div class="cmsgs" id="cMsgs"></div>
+    ${closed ? `<div class="note" style="margin-top:10px">المحادثة مغلقة (حالة الطلب: ${esc(o.status || "")}).</div>` : `<div class="crow"><input id="cIn" type="text" maxlength="500" placeholder="اكتب رسالة للزبون…" autocomplete="off"><button class="btn acc sm" id="cSend" type="button">إرسال</button></div>`}
+    <button class="btn ghost" id="cClose" type="button" style="margin-top:10px">رجوع</button>`);
+  chatCtx = { el: m, orderId: o.id, order: o };
+  const done = () => { chatCtx = null; m.remove(); render(); };
+  m.addEventListener("click", (e) => { if (e.target === m) done(); });
+  m.querySelector("#cClose").onclick = done;
+  const send = async () => {
+    const inp = m.querySelector("#cIn"); if (!inp) return;
+    const text = inp.value.trim().slice(0, 500); if (!text) return;
+    inp.value = "";
+    try { await addDoc(collection(db, "orderChats"), { orderId: o.id, uid: o.uid, driverId: S.user.uid, from: "driver", text, createdAt: serverTimestamp() }); }
+    catch (e) { inp.value = text; toast("تعذر إرسال الرسالة", "err"); }
+  };
+  if (!closed) { m.querySelector("#cSend").onclick = send; m.querySelector("#cIn").onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); send(); } }; }
+  renderChatList();
+}
+
 /* ───────────── ورقة تفاصيل الطلب ───────────── */
 let map = null, mapMarkers = {};
 function destroyMap() { try { map?.remove(); } catch (e) {} map = null; mapMarkers = {}; }
@@ -588,6 +649,7 @@ function renderSheet(job) {
       <div class="acts">
         <a href="tel:${esc(c.phone)}"><span class="ic">${ic("phone")}</span>اتصال</a>
         <a href="https://wa.me/${esc(waNumber(c.phone))}" target="_blank" rel="noopener"><span class="ic">${ic("chat")}</span>واتساب</a>
+        <button type="button" id="aChat" style="position:relative"><span class="ic">${ic("chat")}</span>مراسلة${chatUnread(o.id) ? `<i class="cdot"></i>` : ""}</button>
         <a href="${esc(nav.google)}" target="_blank" rel="noopener"><span class="ic">${ic("map")}</span>Google Maps</a>
         <a href="${esc(nav.waze)}" target="_blank" rel="noopener"><span class="ic">${ic("car")}</span>Waze</a>
       </div>
@@ -605,6 +667,7 @@ function renderSheet(job) {
     </div>
     ${cta ? `<div class="cta">${cta}</div>` : ""}</div>`;
   $("shClose").onclick = () => { S.openKey = null; destroyMap(); render(); };
+  if ($("aChat")) $("aChat").onclick = () => openChat(job);
   if ($("aStart")) $("aStart").onclick = () => actStart(job);
   if ($("aArrive")) $("aArrive").onclick = () => actArrive(job);
   if ($("aDone")) $("aDone").onclick = () => confirmDeliver(job, per);
@@ -682,6 +745,23 @@ function startListeners(uid) {
     if (!changed) return; // تحديثات الموقع فقط: ما نعاودوش رسم الشاشة (باش الخريطة والتمرير ما يتقطعوش)
     syncTracking(); render();
   }, () => {}));
+  // مراسلة الزبناء (تنبيه عند وصول رسالة جديدة) + تقييمات الزبناء
+  let firstChats = true;
+  unsubs.push(onSnapshot(query(collection(db, "orderChats"), where("driverId", "==", uid)), (snap) => {
+    snap.docChanges().forEach((ch) => {
+      if (ch.type === "removed") { S.chats.delete(ch.doc.id); return; }
+      const msg = { id: ch.doc.id, ...ch.doc.data() };
+      S.chats.set(msg.id, msg);
+      if (!firstChats && ch.type === "added" && msg.from === "customer" && !ch.doc.metadata.hasPendingWrites) {
+        if (chatCtx && chatCtx.orderId === msg.orderId) return;
+        toast("💬 رسالة جديدة من الزبون: " + String(msg.text).slice(0, 40), "ok"); beep(); if (navigator.vibrate) navigator.vibrate([120, 60, 120]);
+      }
+    });
+    firstChats = false;
+    if (chatCtx) renderChatList();
+    render();
+  }, () => {}));
+  unsubs.push(onSnapshot(query(collection(db, "driverReviews"), where("driverId", "==", uid)), (snap) => { S.reviews = snap.docs.map((d) => d.data()); if (S.tab === "me") render(); }, () => {}));
   // المحفظة: الرصيد + العمليات + طلبات الشحن
   unsubs.push(onSnapshot(doc(db, "driverWallets", uid), (snap) => { S.wallet = snap.exists() ? snap.data() : null; render(); }, () => {}));
   unsubs.push(onSnapshot(query(collection(db, "walletTx"), where("driverId", "==", uid)), (snap) => { S.txs = snap.docs.map((d) => ({ id: d.id, ...d.data() })); if (S.tab === "wallet") render(); }, () => {}));
@@ -692,7 +772,7 @@ function startListeners(uid) {
 let meUnsub = null;
 onAuthStateChanged(auth, (user) => {
   S.user = user; stopListeners(); meUnsub?.(); meUnsub = null;
-  S.orders.clear(); S.deliveries.clear(); S.me = null; S.wallet = null; S.txs = []; S.topups = [];
+  S.orders.clear(); S.deliveries.clear(); S.me = null; S.wallet = null; S.txs = []; S.topups = []; S.chats.clear(); S.reviews = [];
   if (!user) { S.screen = "auth"; syncTracking(); render(); return; }
   S.screen = "loading"; render();
   meUnsub = onSnapshot(doc(db, "drivers", user.uid), (snap) => {

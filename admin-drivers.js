@@ -186,7 +186,7 @@ async function viewReceipt(id) {
 export async function renderDriversTab(el) {
   cleanupHex();
   el.innerHTML = `<div class="empty">جارٍ التحميل...</div>`;
-  let drivers = [], deliveries = [], fee = 0, wallets = {}, topups = [];
+  let drivers = [], deliveries = [], fee = 0, wallets = {}, topups = [], reviews = [];
   try {
     const [dr, de, st, wa, tp] = await Promise.all([
       getDocs(collection(db, "drivers")).then((s) => s.docs.map((d) => ({ id: d.id, ...d.data() }))),
@@ -204,7 +204,13 @@ export async function renderDriversTab(el) {
     document.getElementById("drRetry").onclick = () => renderDriversTab(el);
     return;
   }
+  // تقييمات الزبناء للسائقين (لا تمنع تحميل الصفحة إلا كانت القواعد الجديدة ما نشرتش بعد)
+  try { reviews = (await getDocs(query(collection(db, "driverReviews"), orderBy("createdAt", "desc"), limit(1000)))).docs.map((d) => d.data()); } catch (e) { reviews = []; }
   const today = todayStr();
+  const rate = (id) => {
+    const r = reviews.filter((x) => x.driverId === id), n = r.length;
+    return { n, avg: n ? r.reduce((a, x) => a + (Number(x.stars) || 0), 0) / n : 0, rude: r.filter((x) => x.polite === false).length, money: r.filter((x) => x.askedMoney === true).length };
+  };
   const stat = (id) => {
     const mine = deliveries.filter((d) => d.driverId === id);
     const done = mine.filter((d) => d.status === "delivered");
@@ -230,6 +236,7 @@ export async function renderDriversTab(el) {
       <div style="color:#64748b;font-size:13px;margin:6px 0">${ic("phone")} <a href="tel:${esc(d.phone)}" dir="ltr">${esc(d.phone)}</a> · ${ic("scooter")} ${esc(d.vehicle || "—")} · ${esc(d.email || "")}</div>
       ${d.status === "active" ? `<div style="display:flex;gap:8px;flex-wrap:wrap;font-size:13px;margin:6px 0">
         <span class="info-tag">اليوم: ${s.todayN}</span><span class="info-tag">المجموع: ${s.totalN}</span><span class="info-tag">فشل: ${s.failed}</span>
+        ${(() => { const r = rate(d.id); return r.n ? `<span class="info-tag" style="background:#fffbeb;color:#92400e;font-weight:800">★ ${r.avg.toFixed(1)} (${r.n})</span>${r.rude ? `<span class="info-tag" style="background:#fee2e2;color:#991b1b">غير مهذب: ${r.rude}</span>` : ""}${r.money ? `<span class="info-tag" style="background:#fee2e2;color:#991b1b">طلب زيادة مال: ${r.money}</span>` : ""}` : `<span class="info-tag" style="color:#94a3b8">بدون تقييم</span>`; })()}
         <span class="info-tag" style="background:${bal < 0 ? "#fee2e2;color:#991b1b" : "#ecfdf5;color:#065f46"}">${ic("wallet")} المحفظة: ${money(bal)}</span>
         <span class="info-tag">أرباح لم تُسوَّ: ${money(s.earnDue)}</span><span class="info-tag" style="background:#fffbeb;color:#92400e">كاش لم يُسلَّم: ${money(s.cashDue)}</span></div>
         ${s.active ? `<div style="font-size:13px;color:#92400e;margin:4px 0">توصيلة جارية: ${esc(DEL_AR[s.active.status])} · WJ-${esc(String(s.active.orderId).slice(0, 8).toUpperCase())}${mapLink(s.active.driverLoc) ? ` · <a target="_blank" rel="noopener" href="${mapLink(s.active.driverLoc)}">الموقع المباشر</a>` : ""}</div>` : ""}

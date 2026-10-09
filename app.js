@@ -1498,31 +1498,141 @@ async function renderMyOrdersList() {
     <div class="modal-head"><h3>${ico("orders")}${s.myOrdersTitle}</h3><button class="close" onclick="closeMyOrders()">${ico("close")}</button></div>
     ${cardsHtml}`;
 }
-/* ═══════ تتبع سائق التوصيل (من وثائق deliveries الخاصة بالزبون) ═══════ */
-let driverTrackUnsub = null;
+/* ═══════ تتبع سائق التوصيل: خريطة مباشرة + مراسلة + تقييم (من وثائق deliveries الخاصة بالزبون) ═══════ */
+let driverTrackUnsub = null, driverChatUnsub = null, driverMap = null, driverMapMk = {}, driverAgeTimer = null;
 function stopDriverTracking() {
   if (driverTrackUnsub) { try { driverTrackUnsub(); } catch (e) {} driverTrackUnsub = null; }
+  if (driverChatUnsub) { try { driverChatUnsub(); } catch (e) {} driverChatUnsub = null; }
+  if (driverAgeTimer) { clearInterval(driverAgeTimer); driverAgeTimer = null; }
+  try { driverMap?.remove(); } catch (e) {}
+  driverMap = null; driverMapMk = {};
 }
 const DRIVER_TXT = {
   ar: { title: "سائق التوصيل", call: "اتصال بالسائق", track: "تتبع السائق على الخريطة", assigned: "تم تعيين سائق لطلبك", pickedUp: "السائق فالطريق إليك", arrived: "السائق وصل إلى عنوانك", delivered: "تم تسليم طلبك", failed: "تعذر التسليم — تواصل مع الدعم", steps: ["معيّن", "فالطريق", "وصل", "تم التسليم"], today: "توصيلة اليوم", live: "مباشر" },
   fr: { title: "Livreur", call: "Appeler le livreur", track: "Suivre le livreur sur la carte", assigned: "Un livreur a été assigné à votre commande", pickedUp: "Votre livreur est en route", arrived: "Votre livreur est arrivé", delivered: "Commande livrée", failed: "Livraison impossible — contactez le support", steps: ["Assigné", "En route", "Arrivé", "Livré"], today: "Livraison du jour", live: "En direct" },
 };
+const DRV2 = {
+  ar: {
+    chat: "مراسلة السائق", chatPh: "اكتب رسالة للسائق…", send: "إرسال", chatEmpty: "ابدأ المحادثة مع سائقك", chatClosed: "المحادثة مغلقة بعد انتهاء الطلب", chatErr: "تعذر إرسال الرسالة",
+    ageNow: "الآن", ageSec: (n) => `قبل ${n} ث`, ageMin: (n) => `قبل ${n} د`, liveLbl: "موقع السائق مباشر", rateDriver: "قيّم السائق", rated: "شكراً على تقييمك",
+    rateTitle: "كيف كان توصيلك؟", rateSub: (n) => (n ? `قيّم السائق ${n}` : "قيّم سائق التوصيل"), qPolite: "هل كان السائق معكم مهذباً؟", qMoney: "هل طلب منكم زيادة مال؟",
+    yes: "نعم", no: "لا", comment: "ملاحظة (اختياري)", submit: "إرسال التقييم", later: "لاحقاً", thanks: "شكراً لك! تقييمك كيعاوننا نحسّنو الخدمة", rateErr: "تعذر إرسال التقييم، حاول مرة أخرى",
+    starLbl: ["سيئ", "ضعيف", "مقبول", "جيد", "ممتاز"],
+  },
+  fr: {
+    chat: "Écrire au livreur", chatPh: "Écrivez un message…", send: "Envoyer", chatEmpty: "Démarrez la conversation avec votre livreur", chatClosed: "Conversation fermée après la livraison", chatErr: "Message non envoyé",
+    ageNow: "à l'instant", ageSec: (n) => `il y a ${n} s`, ageMin: (n) => `il y a ${n} min`, liveLbl: "Position du livreur en direct", rateDriver: "Noter le livreur", rated: "Merci pour votre avis",
+    rateTitle: "Comment s'est passée la livraison ?", rateSub: (n) => (n ? `Notez le livreur ${n}` : "Notez votre livreur"), qPolite: "Le livreur a-t-il été poli ?", qMoney: "A-t-il demandé de l'argent en plus ?",
+    yes: "Oui", no: "Non", comment: "Commentaire (facultatif)", submit: "Envoyer l'avis", later: "Plus tard", thanks: "Merci ! Votre avis nous aide à améliorer le service", rateErr: "Envoi impossible, réessayez",
+    starLbl: ["Mauvais", "Faible", "Correct", "Bien", "Excellent"],
+  },
+};
+const CHAT_CLOSED_STATUS = ["تم التسليم", "ملغى من طرف الزبون", "ملغى من المشرف", "ملغي"];
+
 function mountDriverBlock(o) {
   const box = document.getElementById("driverBlock");
   if (!box || !currentUser) return;
-  const dt = DRIVER_TXT[lang] || DRIVER_TXT.ar;
+  const dt = { ...(DRIVER_TXT[lang] || DRIVER_TXT.ar), ...(DRV2[lang] || DRV2.ar) };
+  const q = (id) => document.getElementById(id);
+  const dest = coordsOf(o.customer?.mapLink);
+  const chatClosed = CHAT_CLOSED_STATUS.includes(o.status);
+  box.innerHTML = `<h4>${drvIc("scooter")} ${dt.title}</h4>
+    <div id="drvInfo"></div>
+    <div id="drvMapWrap" class="hide"><div class="drv-live"><i></i>${dt.liveLbl}<span id="drvAge"></span></div><div id="drvMap" class="drv-map"></div></div>
+    <button type="button" id="drvChatBtn" class="drv-chat-btn">${drvIc("chat")} ${dt.chat}<i class="drv-dot hide" id="drvDot"></i></button>
+    <div id="drvChat" class="hide"></div>`;
+  let lastDel = null, msgs = [], chatShown = false;
+  const seenKey = "drvChatSeen_" + o.id;
+  let seen = 0; try { seen = Number(localStorage.getItem(seenKey)) || 0; } catch (e) {}
+
+  /* — معلومات السائق + خطوات التوصيل — */
   const draw = (del) => {
     const st = del?.status || "assigned";
     const idx = { assigned: 0, pickedUp: 1, arrived: 2, delivered: 3, failed: 2 }[st];
     const steps = dt.steps.map((l, i) => `<div style="flex:1;text-align:center;font-size:11px;color:${i <= idx && st !== "failed" ? "#065f46" : "#94a3b8"};font-weight:700"><div style="width:22px;height:22px;border-radius:50%;margin:0 auto 3px;background:${i < idx || st === "delivered" ? "#10b981" : i === idx && st !== "failed" ? "#f59e0b" : "#e2e8f0"};color:#fff;line-height:22px;font-size:12px">${i < idx || st === "delivered" ? "✓" : i + 1}</div>${l}</div>`).join("");
-    const loc = del && (st === "pickedUp" || st === "arrived") && del.driverLoc && del.driverLoc.lat != null
-      ? `https://www.google.com/maps?q=${del.driverLoc.lat},${del.driverLoc.lng}` : "";
-    box.innerHTML = `<h4>${drvIc("scooter")} ${dt.title}</h4>
-      <div class="order-detail-row"><b>${escapeHtml(o.driverName || "")}</b>${o.driverPhone ? `<a href="tel:${escapeAttr(o.driverPhone)}" style="text-decoration:none;background:#ecfdf5;color:#047857;border-radius:10px;padding:6px 12px;font-weight:800;font-size:13px">${drvIc("phone")} ${dt.call}</a>` : ""}</div>
+    let rateHtml = "";
+    if (st === "delivered" && del) {
+      const rid = del.orderId + "_" + del.date;
+      rateHtml = drvRate.reviewed.has(rid)
+        ? `<div class="drv-rated">★ ${dt.rated}</div>`
+        : `<button type="button" id="drvRateBtn" class="drv-rate-btn">★ ${dt.rateDriver}</button>`;
+    }
+    q("drvInfo").innerHTML = `<div class="order-detail-row"><b>${escapeHtml(o.driverName || "")}</b>${o.driverPhone ? `<a href="tel:${escapeAttr(o.driverPhone)}" style="text-decoration:none;background:#ecfdf5;color:#047857;border-radius:10px;padding:6px 12px;font-weight:800;font-size:13px">${drvIc("phone")} ${dt.call}</a>` : ""}</div>
       <div style="font-weight:800;margin:8px 0;color:#064e3b">${dt[st]}</div>
-      <div style="display:flex;gap:4px;margin:6px 0 10px">${steps}</div>
-      ${loc ? `<a href="${loc}" target="_blank" rel="noopener" style="display:block;text-align:center;text-decoration:none;background:#064e3b;color:#fff;border-radius:12px;padding:11px;font-weight:800">${drvIc("pin")} ${dt.track} <small style="opacity:.8">(${dt.live})</small></a>` : ""}`;
+      <div style="display:flex;gap:4px;margin:6px 0 10px">${steps}</div>${rateHtml}`;
+    const rb = q("drvRateBtn");
+    if (rb) rb.onclick = () => openDriverRating(del.orderId + "_" + del.date, del);
   };
+
+  /* — الخريطة الحية — */
+  const dot = (name, bg) => L.divIcon({ className: "", html: `<div style="width:36px;height:36px;border-radius:50%;background:${bg};color:#fff;display:flex;align-items:center;justify-content:center;border:3px solid #fff;box-shadow:0 3px 8px #0006">${drvIc(name)}</div>`, iconSize: [36, 36], iconAnchor: [18, 18] });
+  const ageTxt = () => {
+    const at = lastDel?.driverLoc?.at; if (!at) return "";
+    const sec = Math.max(0, Math.round((Date.now() - at) / 1000));
+    return " · " + (sec < 8 ? dt.ageNow : sec < 90 ? dt.ageSec(sec) : dt.ageMin(Math.round(sec / 60)));
+  };
+  const updateMap = (del) => {
+    const live = del && (del.status === "pickedUp" || del.status === "arrived") && del.driverLoc && del.driverLoc.lat != null;
+    const wrap = q("drvMapWrap");
+    if (!live) { wrap.classList.add("hide"); return; }
+    wrap.classList.remove("hide");
+    q("drvAge").textContent = ageTxt();
+    const ll = [del.driverLoc.lat, del.driverLoc.lng];
+    if (!window.L) { q("drvMap").innerHTML = `<a href="https://www.google.com/maps?q=${ll[0]},${ll[1]}" target="_blank" rel="noopener" style="display:block;padding:14px;text-align:center;font-weight:800">${dt.track}</a>`; return; }
+    if (!driverMap) {
+      driverMap = L.map(q("drvMap"), { zoomControl: false, attributionControl: true }).setView(ll, 15);
+      driverMap.attributionControl.setPrefix(false);
+      L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "© OpenStreetMap" }).addTo(driverMap);
+      if (dest) driverMapMk.dest = L.marker([dest.lat, dest.lng], { icon: dot("pin", "#dc2626") }).addTo(driverMap);
+      setTimeout(() => driverMap && driverMap.invalidateSize(), 250);
+    }
+    if (driverMapMk.me) driverMapMk.me.setLatLng(ll); else driverMapMk.me = L.marker(ll, { icon: dot("scooter", "#064e3b") }).addTo(driverMap);
+    if (!driverMapMk.fitted) {
+      if (dest) driverMap.fitBounds([ll, [dest.lat, dest.lng]], { padding: [36, 36], maxZoom: 16 }); else driverMap.setView(ll, 15);
+      driverMapMk.fitted = true;
+    }
+  };
+  driverAgeTimer = setInterval(() => { const a = q("drvAge"); if (a && lastDel) a.textContent = ageTxt(); }, 10000);
+
+  /* — المراسلة — */
+  const tsOf = (m) => (m.createdAt?.toMillis ? m.createdAt.toMillis() : Date.now());
+  const driverCount = () => msgs.filter((m) => m.from === "driver").length;
+  const refreshDot = () => q("drvDot")?.classList.toggle("hide", chatShown || driverCount() <= seen);
+  const renderMsgs = () => {
+    const list = q("drvMsgs"); if (!list) return;
+    list.innerHTML = msgs.length
+      ? msgs.map((m) => `<div class="drv-m ${m.from === "customer" ? "me" : ""}">${escapeHtml(m.text)}</div>`).join("")
+      : `<div class="drv-chat-empty">${dt.chatEmpty}</div>`;
+    list.scrollTop = list.scrollHeight;
+  };
+  const markSeen = () => { seen = driverCount(); try { localStorage.setItem(seenKey, String(seen)); } catch (e) {} refreshDot(); };
+  const send = async () => {
+    const inp = q("drvMsgIn"); if (!inp || chatClosed) return;
+    const text = inp.value.trim().slice(0, 500); if (!text) return;
+    inp.value = "";
+    try { await addDoc(collection(db, "orderChats"), { orderId: o.id, uid: currentUser.uid, driverId: o.driverId, from: "customer", text, createdAt: serverTimestamp() }); }
+    catch (e) { inp.value = text; toast(dt.chatErr, "error"); }
+  };
+  q("drvChatBtn").onclick = () => {
+    chatShown = !chatShown;
+    const c = q("drvChat");
+    c.classList.toggle("hide", !chatShown);
+    if (chatShown) {
+      c.innerHTML = `<div class="drv-msgs" id="drvMsgs"></div>
+        ${chatClosed ? `<div class="drv-chat-closed">${dt.chatClosed}</div>` : `<div class="drv-chat-row"><input id="drvMsgIn" type="text" maxlength="500" placeholder="${escapeAttr(dt.chatPh)}" autocomplete="off"><button type="button" id="drvSend">${dt.send}</button></div>`}`;
+      renderMsgs(); markSeen();
+      if (q("drvSend")) { q("drvSend").onclick = send; q("drvMsgIn").onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); send(); } }; }
+    }
+  };
+  driverChatUnsub = onSnapshot(
+    query(collection(db, "orderChats"), where("uid", "==", currentUser.uid), where("orderId", "==", o.id)),
+    (snap) => {
+      msgs = snap.docs.map((d) => ({ id: d.id, ...d.data() })).sort((a, b) => tsOf(a) - tsOf(b));
+      if (chatShown) { renderMsgs(); markSeen(); } else refreshDot();
+    },
+    () => {}
+  );
+
   draw(null);
   const today = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; })();
   driverTrackUnsub = onSnapshot(
@@ -1530,10 +1640,89 @@ function mountDriverBlock(o) {
     (snap) => {
       const mine = snap.docs.map((d) => d.data()).filter((d) => d.orderId === o.id);
       const del = mine.find((d) => d.date === today) || mine.sort((a, b) => b.date.localeCompare(a.date))[0] || null;
+      lastDel = del;
       draw(del);
+      updateMap(del);
     },
     () => {}
   );
+}
+
+/* ═══════ تقييم السائق بعد التسليم (نجوم + مهذب؟ + طلب زيادة مال؟) ═══════ */
+const drvRate = { dels: new Map(), reviewed: new Set(), ready: 0, unsubs: [], showing: false, timer: null };
+function stopDriverRatings() {
+  drvRate.unsubs.forEach((u) => { try { u(); } catch (e) {} });
+  drvRate.unsubs = []; drvRate.dels.clear(); drvRate.reviewed.clear(); drvRate.ready = 0;
+  clearTimeout(drvRate.timer);
+}
+function watchDriverRatings(uid) {
+  stopDriverRatings();
+  drvRate.unsubs.push(onSnapshot(query(collection(db, "driverReviews"), where("uid", "==", uid)), (snap) => {
+    drvRate.reviewed = new Set(snap.docs.map((d) => d.id)); drvRate.ready |= 1; maybePromptDriverRating();
+  }, () => { drvRate.ready |= 1; }));
+  drvRate.unsubs.push(onSnapshot(query(collection(db, "deliveries"), where("uid", "==", uid)), (snap) => {
+    drvRate.dels = new Map(snap.docs.map((d) => [d.id, d.data()])); drvRate.ready |= 2; maybePromptDriverRating();
+  }, () => { drvRate.ready |= 2; }));
+}
+function drvRateSkipped() { try { return JSON.parse(sessionStorage.getItem("drvRateSkip") || "[]"); } catch (e) { return []; } }
+function maybePromptDriverRating() {
+  if (drvRate.ready < 3 || drvRate.showing || !currentUser) return;
+  if (document.getElementById("accountModal")?.classList.contains("show")) return;
+  const now = Date.now(), skipped = drvRateSkipped();
+  const cand = [...drvRate.dels.entries()]
+    .filter(([id, d]) => d.status === "delivered" && d.driverId && !drvRate.reviewed.has(id) && !skipped.includes(id) && (!d.deliveredAt?.seconds || d.deliveredAt.seconds * 1000 > now - 7 * 864e5))
+    .sort((a, b) => (b[1].deliveredAt?.seconds || 0) - (a[1].deliveredAt?.seconds || 0))[0];
+  if (!cand) return;
+  clearTimeout(drvRate.timer);
+  drvRate.timer = setTimeout(() => openDriverRating(cand[0], cand[1]), 900);
+}
+async function openDriverRating(id, d) {
+  if (drvRate.showing || drvRate.reviewed.has(id) || !currentUser) return;
+  drvRate.showing = true;
+  const dt = DRV2[lang] || DRV2.ar;
+  let name = "";
+  try { const os = await getDoc(doc(db, "orders", d.orderId)); if (os.exists()) name = os.data().driverName || ""; } catch (e) {}
+  let m = document.getElementById("drvRateModal");
+  if (!m) {
+    m = document.createElement("div"); m.className = "modal"; m.id = "drvRateModal"; m.style.zIndex = "280";
+    m.innerHTML = `<div class="modal-box" id="drvRateBox" role="dialog" aria-modal="true"></div>`;
+    document.body.appendChild(m);
+  }
+  const box = m.querySelector("#drvRateBox");
+  const st = { stars: 0, polite: null, asked: null, comment: "", busy: false };
+  const close = (skip) => {
+    if (skip) { const s = drvRateSkipped(); s.push(id); try { sessionStorage.setItem("drvRateSkip", JSON.stringify(s)); } catch (e) {} }
+    m.classList.remove("show"); drvRate.showing = false;
+    setTimeout(maybePromptDriverRating, 500);
+  };
+  const yn = (key, val) => `<div class="drv-yn"><button type="button" data-k="${key}" data-v="1" class="${val === true ? "on" : ""}">${dt.yes}</button><button type="button" data-k="${key}" data-v="0" class="${val === false ? "on" : ""}">${dt.no}</button></div>`;
+  const draw = () => {
+    const ready = st.stars > 0 && st.polite !== null && st.asked !== null;
+    box.innerHTML = `<div class="modal-head"><h3>${dt.rateTitle}</h3><button class="close" id="drvRateX" type="button">${ico("close")}</button></div>
+      <div class="drv-rate-who">${drvIc("scooter")}<b>${dt.rateSub(escapeHtml(name))}</b></div>
+      <div class="drv-stars" id="drvStars">${[1, 2, 3, 4, 5].map((n) => `<button type="button" data-s="${n}" aria-label="${n}/5" class="${n <= st.stars ? "on" : ""}">★</button>`).join("")}</div>
+      <div class="drv-star-lbl">${st.stars ? dt.starLbl[st.stars - 1] : "&nbsp;"}</div>
+      <div class="drv-q">${dt.qPolite}</div>${yn("polite", st.polite)}
+      <div class="drv-q">${dt.qMoney}</div>${yn("asked", st.asked)}
+      <textarea id="drvRateTxt" rows="2" maxlength="500" placeholder="${escapeAttr(dt.comment)}">${escapeHtml(st.comment)}</textarea>
+      <button class="checkout" id="drvRateGo" type="button" style="margin-top:12px" ${ready && !st.busy ? "" : "disabled"}>${dt.submit}</button>
+      <button type="button" class="link-btn" id="drvRateLater" style="display:block;margin:10px auto 0">${dt.later}</button>`;
+    box.querySelectorAll("[data-s]").forEach((b) => (b.onclick = () => { st.stars = +b.dataset.s; draw(); }));
+    box.querySelectorAll("[data-k]").forEach((b) => (b.onclick = () => { st[b.dataset.k] = b.dataset.v === "1"; draw(); }));
+    box.querySelector("#drvRateTxt").oninput = (e) => { st.comment = e.target.value; };
+    box.querySelector("#drvRateX").onclick = () => close(true);
+    box.querySelector("#drvRateLater").onclick = () => close(true);
+    box.querySelector("#drvRateGo").onclick = async () => {
+      if (st.busy) return; st.busy = true; draw();
+      try {
+        await setDoc(doc(db, "driverReviews", id), { orderId: d.orderId, date: d.date, uid: currentUser.uid, driverId: d.driverId, stars: st.stars, polite: st.polite, askedMoney: st.asked, comment: st.comment.trim().slice(0, 500), createdAt: serverTimestamp() });
+        drvRate.reviewed.add(id);
+        box.innerHTML = `<div class="notice" style="text-align:center;font-size:16px;margin:10px 0">${dt.thanks}</div>`;
+        setTimeout(() => close(false), 1600);
+      } catch (e) { st.busy = false; toast(dt.rateErr, "error"); draw(); }
+    };
+  };
+  m.classList.add("show"); draw();
 }
 
 function openOrderDetail(id) {
@@ -3389,12 +3578,14 @@ onAuthStateChanged(auth, async (user) => {
     updateAccountButton();
     loadMembership(user.uid); // كيكمل فالخلفية، وكيحدث الزر وحدو ملي يوصل
     watchUnreadMessages(user.uid);
+    watchDriverRatings(user.uid);
     maybeRequirePolicyReaccept();
   } else {
     userProfile = null;
     membershipData = null;
     profileIncomplete = false;
     stopWatchingUnreadMessages();
+    stopDriverRatings();
   }
   updateAccountButton();
 });
