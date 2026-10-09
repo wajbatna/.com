@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="theme-color" content="#064E3B">
+  <meta name="color-scheme" content="only light">
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="apple-touch-icon" href="img/pwa/apple-touch-icon.png">
   <link rel="icon" type="image/png" href="img/pwa/icon-192.png">
@@ -65,8 +66,15 @@
     .drv-dot{position:absolute;top:8px;inset-inline-end:12px;width:11px;height:11px;border-radius:50%;background:#dc2626;border:2px solid #fff}
     .drv-dot.hide,#drvChat.hide,#drvMapWrap.hide{display:none}
     .drv-msgs{display:flex;flex-direction:column;gap:6px;max-height:230px;min-height:90px;overflow-y:auto;padding:10px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;margin-top:8px}
+    .drv-dist{margin-inline-start:auto;color:#047857;font-weight:900;font-size:13px}
     .drv-m{max-width:82%;padding:7px 12px;border-radius:14px;font-size:14px;line-height:1.55;word-break:break-word;background:#fff;border:1px solid #e2e8f0;align-self:flex-end}
     .drv-m.me{align-self:flex-start;background:#064e3b;color:#fff;border-color:#064e3b}
+    #drvChat,#drvChat .drv-msgs{color-scheme:light;color:#0f172a}
+    #drvChat .drv-m.from-driver{background:#ecfdf5!important;color:#064e3b!important;border:1px solid #a7f3d0!important;-webkit-text-fill-color:#064e3b}
+    #drvChat .drv-m.from-driver small{display:block;font-size:11px;font-weight:800;color:#047857!important;-webkit-text-fill-color:#047857;margin-bottom:2px}
+    #drvChat .drv-m.from-driver span{color:#064e3b!important;-webkit-text-fill-color:#064e3b}
+    #drvChat .drv-m.me,#drvChat .drv-m.me span{background:#064e3b!important;color:#ffffff!important;-webkit-text-fill-color:#ffffff}
+    #drvChat .drv-m.me{background:#064e3b!important}
     .drv-chat-empty,.drv-chat-closed{text-align:center;color:#64748b;font-size:13px;padding:14px 6px}
     .drv-chat-row{display:flex;gap:6px;margin-top:8px}
     .drv-chat-row input{flex:1;min-width:0;border:1.5px solid #e2e8f0;border-radius:12px;padding:10px 12px;font:inherit;font-size:14px}

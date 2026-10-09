@@ -1555,14 +1555,14 @@ const DRIVER_TXT = {
 };
 const DRV2 = {
   ar: {
-    chat: "مراسلة السائق", chatPh: "اكتب رسالة للسائق…", send: "إرسال", chatEmpty: "ابدأ المحادثة مع سائقك", chatClosed: "المحادثة مغلقة بعد انتهاء الطلب", chatErr: "تعذر إرسال الرسالة", loadErr: "تعذر تحميل البيانات — تأكد من نشر قواعد Firestore الجديدة", waitLoc: "بانتظار موقع السائق… (يظهر عندما يفتح السائق تطبيقه ويفعّل الموقع)",
+    chat: "مراسلة السائق", chatPh: "اكتب رسالة للسائق…", send: "إرسال", chatEmpty: "ابدأ المحادثة مع سائقك", chatClosed: "المحادثة مغلقة بعد انتهاء الطلب", chatErr: "تعذر إرسال الرسالة", loadErr: "تعذر تحميل البيانات — تأكد من نشر قواعد Firestore الجديدة", distLbl: (d) => `يبعد عنك ${d}`, drvWho: "السائق", waitLoc: "بانتظار موقع السائق… (يظهر عندما يفتح السائق تطبيقه ويفعّل الموقع)",
     ageNow: "الآن", ageSec: (n) => `قبل ${n} ث`, ageMin: (n) => `قبل ${n} د`, liveLbl: "موقع السائق مباشر", rateDriver: "قيّم السائق", rated: "شكراً على تقييمك",
     rateTitle: "كيف كان توصيلك؟", rateSub: (n) => (n ? `قيّم السائق ${n}` : "قيّم سائق التوصيل"), qPolite: "هل كان السائق معكم مهذباً؟", qMoney: "هل طلب منكم زيادة مال؟",
     yes: "نعم", no: "لا", comment: "ملاحظة (اختياري)", submit: "إرسال التقييم", later: "لاحقاً", thanks: "شكراً لك! تقييمك كيعاوننا نحسّنو الخدمة", rateErr: "تعذر إرسال التقييم، حاول مرة أخرى",
     starLbl: ["سيئ", "ضعيف", "مقبول", "جيد", "ممتاز"],
   },
   fr: {
-    chat: "Écrire au livreur", chatPh: "Écrivez un message…", send: "Envoyer", chatEmpty: "Démarrez la conversation avec votre livreur", chatClosed: "Conversation fermée après la livraison", chatErr: "Message non envoyé", loadErr: "Chargement impossible — publiez les nouvelles règles Firestore", waitLoc: "En attente de la position du livreur…",
+    chat: "Écrire au livreur", chatPh: "Écrivez un message…", send: "Envoyer", chatEmpty: "Démarrez la conversation avec votre livreur", chatClosed: "Conversation fermée après la livraison", chatErr: "Message non envoyé", loadErr: "Chargement impossible — publiez les nouvelles règles Firestore", distLbl: (d) => `à ${d} de vous`, drvWho: "Livreur", waitLoc: "En attente de la position du livreur…",
     ageNow: "à l'instant", ageSec: (n) => `il y a ${n} s`, ageMin: (n) => `il y a ${n} min`, liveLbl: "Position du livreur en direct", rateDriver: "Noter le livreur", rated: "Merci pour votre avis",
     rateTitle: "Comment s'est passée la livraison ?", rateSub: (n) => (n ? `Notez le livreur ${n}` : "Notez votre livreur"), qPolite: "Le livreur a-t-il été poli ?", qMoney: "A-t-il demandé de l'argent en plus ?",
     yes: "Oui", no: "Non", comment: "Commentaire (facultatif)", submit: "Envoyer l'avis", later: "Plus tard", thanks: "Merci ! Votre avis nous aide à améliorer le service", rateErr: "Envoi impossible, réessayez",
@@ -1590,7 +1590,7 @@ function mountDriverBlockInner(o) {
   const chatClosed = CHAT_CLOSED_STATUS.includes(o.status);
   box.innerHTML = `<h4>${drvIc("scooter")} ${dt.title}</h4>
     <div id="drvInfo"></div>
-    <div id="drvMapWrap" class="hide"><div class="drv-live"><i></i>${dt.liveLbl}<span id="drvAge"></span></div><div class="drv-mapbox"><div id="drvMap" class="drv-map"></div><div id="drvWait" class="drv-wait hide">${dt.waitLoc}</div></div><div id="drvErr" class="drv-err hide">${dt.loadErr}</div></div>
+    <div id="drvMapWrap" class="hide"><div class="drv-live"><i></i>${dt.liveLbl}<span id="drvAge"></span><b id="drvDist" class="drv-dist"></b></div><div class="drv-mapbox"><div id="drvMap" class="drv-map"></div><div id="drvWait" class="drv-wait hide">${dt.waitLoc}</div></div><div id="drvErr" class="drv-err hide">${dt.loadErr}</div></div>
     <button type="button" id="drvChatBtn" class="drv-chat-btn">${drvIc("chat")} ${dt.chat}<i class="drv-dot hide" id="drvDot"></i></button>
     <div id="drvChat" class="hide"></div>`;
   let lastDel = null, msgs = [], chatShown = false;
@@ -1653,6 +1653,23 @@ function mountDriverBlockInner(o) {
         driverMapMk.fitted = true;
       }
     }
+    // خط متصل بين السائق وعنوان الزبون (كيتحدّث كلما تحرّك السائق) + المسافة
+    if (ll && dest) {
+      const pts = [ll, [dest.lat, dest.lng]];
+      if (driverMapMk.line) { driverMapMk.line.setLatLngs(pts); driverMapMk.casing.setLatLngs(pts); }
+      else {
+        driverMapMk.casing = L.polyline(pts, { color: "#ffffff", weight: 9, opacity: 0.95, lineCap: "round" }).addTo(driverMap);
+        driverMapMk.line = L.polyline(pts, { color: "#059669", weight: 5, opacity: 1, lineCap: "round", lineJoin: "round" }).addTo(driverMap);
+      }
+      const R = 6371000, rad = (x) => (x * Math.PI) / 180;
+      const h = Math.sin(rad(dest.lat - ll[0]) / 2) ** 2 + Math.cos(rad(ll[0])) * Math.cos(rad(dest.lat)) * Math.sin(rad(dest.lng - ll[1]) / 2) ** 2;
+      const m = 2 * R * Math.asin(Math.sqrt(h));
+      const txt = m < 1000 ? `${Math.max(10, Math.round(m / 10) * 10)} ${lang === "fr" ? "m" : "م"}` : `${(m / 1000).toFixed(1)} ${lang === "fr" ? "km" : "كم"}`;
+      q("drvDist").textContent = dt.distLbl(txt);
+    } else {
+      q("drvDist").textContent = "";
+      if (driverMapMk.line) { driverMap.removeLayer(driverMapMk.line); driverMap.removeLayer(driverMapMk.casing); driverMapMk.line = driverMapMk.casing = null; }
+    }
   };
   driverAgeTimer = setInterval(() => { const a = q("drvAge"); if (a) a.textContent = ageTxt(); }, 10000);
 
@@ -1663,7 +1680,7 @@ function mountDriverBlockInner(o) {
   const renderMsgs = () => {
     const list = q("drvMsgs"); if (!list) return;
     list.innerHTML = msgs.length
-      ? msgs.map((m) => `<div class="drv-m ${m.from === "customer" ? "me" : ""}">${escapeHtml(m.text)}</div>`).join("")
+      ? msgs.map((m) => `<div class="drv-m ${m.from === "customer" ? "me" : "from-driver"}">${m.from === "customer" ? "" : `<small>${dt.drvWho}</small>`}<span>${escapeHtml(m.text)}</span></div>`).join("")
       : `<div class="drv-chat-empty">${dt.chatEmpty}</div>`;
     list.scrollTop = list.scrollHeight;
   };
