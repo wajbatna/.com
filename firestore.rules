@@ -708,7 +708,7 @@ service cloud.firestore {
       allow update: if (isOwner(uid) && resource.data.status == 'active'
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name', 'phone', 'vehicle', 'online', 'lastLoc', 'lastSeenAt'])
           && validDriverProfile(request.resource.data)
-          && (!('lastSeenAt' in request.resource.data.diff(resource.data).affectedKeys()) || request.resource.data.lastSeenAt == request.time))
+          && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['lastSeenAt']) || request.resource.data.lastSeenAt == request.time))
         || (isAdmin()
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'statusUpdatedAt', 'statusUpdatedBy', 'adminNote'])
           && request.resource.data.status in ['pending', 'active', 'suspended']
@@ -722,6 +722,12 @@ service cloud.firestore {
     // وكيحدّثها: arrived → delivered | failed. الزبون كيقرا توصيلاتو (uid) باش يتتبع، والأدمين يقرا ويعدل.
     function deliveryOrder(orderId) {
       return get(/databases/$(database)/documents/orders/$(orderId));
+    }
+
+    function driverFeeOk(fee) {
+      return (exists(/databases/$(database)/documents/config/driverSettings)
+          && fee == get(/databases/$(database)/documents/config/driverSettings).data.get('feePerDelivery', 0))
+        || (!exists(/databases/$(database)/documents/config/driverSettings) && fee == 0);
     }
 
     function validDeliveryCreate(id, d) {
@@ -738,27 +744,39 @@ service cloud.firestore {
         && d.status == 'pickedUp'
         && d.cod is bool
         && d.fee is number
-        && d.fee == (exists(/databases/$(database)/documents/config/driverSettings)
-              ? get(/databases/$(database)/documents/config/driverSettings).data.get('feePerDelivery', 0) : 0)
-        && (!('driverLoc' in d) || validLatLng(d.driverLoc))
+        && driverFeeOk(d.fee)
+        && (!d.keys().hasAny(['driverLoc']) || validLatLng(d.driverLoc))
         && d.pickedUpAt == request.time && d.createdAt == request.time && d.updatedAt == request.time;
     }
 
+    function deliveryChanged() {
+      return request.resource.data.diff(resource.data).affectedKeys();
+    }
+
+    function deliveryLocOk() {
+      return !deliveryChanged().hasAny(['driverLoc']) || validLatLng(request.resource.data.driverLoc);
+    }
+
     function validDeliveryUpdate() {
-      let d = request.resource.data;
-      let old = resource.data;
-      let keys = d.diff(old).affectedKeys();
-      return old.status in ['pickedUp', 'arrived']
-        && keys.hasOnly(['status', 'arrivedAt', 'deliveredAt', 'failedAt', 'failReason', 'collected', 'driverLoc', 'updatedAt'])
-        && d.updatedAt == request.time
-        && (!('driverLoc' in keys) || validLatLng(d.driverLoc))
-        && (d.status == old.status
-            ? keys.hasOnly(['driverLoc', 'updatedAt'])
-            : (d.status == 'arrived' && old.status == 'pickedUp' && keys.hasOnly(['status', 'arrivedAt', 'driverLoc', 'updatedAt']) && d.arrivedAt == request.time)
-              || (d.status == 'delivered' && keys.hasOnly(['status', 'deliveredAt', 'collected', 'driverLoc', 'updatedAt']) && d.deliveredAt == request.time
-                  && (!('collected' in keys) || (d.collected is number && d.collected >= 0 && d.collected <= 1000000)))
-              || (d.status == 'failed' && keys.hasOnly(['status', 'failedAt', 'failReason', 'driverLoc', 'updatedAt']) && d.failedAt == request.time
-                  && d.failReason is string && d.failReason.size() <= 200));
+      return resource.data.status in ['pickedUp', 'arrived']
+        && request.resource.data.updatedAt == request.time
+        && deliveryLocOk()
+        && (
+          (request.resource.data.status == resource.data.status
+            && deliveryChanged().hasOnly(['driverLoc', 'updatedAt']))
+          || (request.resource.data.status == 'arrived' && resource.data.status == 'pickedUp'
+            && deliveryChanged().hasOnly(['status', 'arrivedAt', 'driverLoc', 'updatedAt'])
+            && request.resource.data.arrivedAt == request.time)
+          || (request.resource.data.status == 'delivered'
+            && deliveryChanged().hasOnly(['status', 'deliveredAt', 'collected', 'driverLoc', 'updatedAt'])
+            && request.resource.data.deliveredAt == request.time
+            && (!deliveryChanged().hasAny(['collected'])
+                || (request.resource.data.collected is number && request.resource.data.collected >= 0 && request.resource.data.collected <= 1000000)))
+          || (request.resource.data.status == 'failed'
+            && deliveryChanged().hasOnly(['status', 'failedAt', 'failReason', 'driverLoc', 'updatedAt'])
+            && request.resource.data.failedAt == request.time
+            && request.resource.data.failReason is string && request.resource.data.failReason.size() <= 200)
+        );
     }
 
     match /deliveries/{deliveryId} {
@@ -820,6 +838,60 @@ service cloud.firestore {
         && request.resource.data.driverId == request.auth.uid
         && validReceiptImage(request.resource.data.image)
         && request.resource.data.createdAt == request.time;
+      allow delete: if isAdmin();
+    }
+
+    // ───────────── محادثة الزبون ↔ السائق (orderChats) ─────────────
+    // رسائل نصية فقط، مرتبطة بطلب معيّن عليه سائق. كيرسل الزبون (صاحب الطلب) أو السائق المعيّن (مفعّل) ما دام الطلب ما تسلّمش ولا تلغى.
+    // الرسائل ما كتتبدلش: إنشاء وقراءة فقط (الحذف للأدمين).
+    function chatOrderData(orderId) {
+      return get(/databases/$(database)/documents/orders/$(orderId)).data;
+    }
+
+    match /orderChats/{msgId} {
+      allow read: if isAdmin() || (isSignedIn() && (resource.data.uid == request.auth.uid || resource.data.driverId == request.auth.uid));
+      allow create: if isSignedIn()
+        && request.resource.data.keys().hasOnly(['orderId', 'uid', 'driverId', 'from', 'text', 'createdAt'])
+        && request.resource.data.orderId is string && request.resource.data.orderId.size() > 0
+        && request.resource.data.uid is string && request.resource.data.driverId is string
+        && request.resource.data.driverId.size() > 0
+        && request.resource.data.from in ['customer', 'driver']
+        && request.resource.data.text is string
+        && request.resource.data.text.size() >= 1 && request.resource.data.text.size() <= 500
+        && request.resource.data.createdAt == request.time
+        && exists(/databases/$(database)/documents/orders/$(request.resource.data.orderId))
+        && chatOrderData(request.resource.data.orderId).uid == request.resource.data.uid
+        && chatOrderData(request.resource.data.orderId).get('driverId', '') == request.resource.data.driverId
+        && chatOrderData(request.resource.data.orderId).get('status', '') in ['تم قبول الطلب', 'قيد التحضير', 'خرج للتوصيل']
+        && (
+          (request.resource.data.from == 'customer' && request.auth.uid == request.resource.data.uid)
+          || (request.resource.data.from == 'driver' && request.auth.uid == request.resource.data.driverId && isActiveDriver())
+        );
+      allow update: if false;
+      allow delete: if isAdmin();
+    }
+
+    // ───────────── تقييم السائق (driverReviews) ─────────────
+    // معرّف الوثيقة = معرّف التوصيلة (<orderId>_<YYYY-MM-DD>). الزبون صاحب التوصيلة يقيّم مرة وحدة بعد حالة delivered:
+    // نجوم 1..5 + هل كان مهذباً + هل طلب زيادة مال + تعليق اختياري. ما كيتبدلش.
+    match /driverReviews/{reviewId} {
+      allow read: if isAdmin() || (isSignedIn() && (resource.data.uid == request.auth.uid || resource.data.driverId == request.auth.uid));
+      allow create: if isSignedIn()
+        && request.resource.data.keys().hasOnly(['orderId', 'date', 'uid', 'driverId', 'stars', 'polite', 'askedMoney', 'comment', 'createdAt'])
+        && request.resource.data.keys().hasAll(['orderId', 'date', 'uid', 'driverId', 'stars', 'polite', 'askedMoney', 'createdAt'])
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.orderId is string && request.resource.data.date is string
+        && reviewId == request.resource.data.orderId + '_' + request.resource.data.date
+        && exists(/databases/$(database)/documents/deliveries/$(reviewId))
+        && get(/databases/$(database)/documents/deliveries/$(reviewId)).data.uid == request.auth.uid
+        && get(/databases/$(database)/documents/deliveries/$(reviewId)).data.driverId == request.resource.data.driverId
+        && get(/databases/$(database)/documents/deliveries/$(reviewId)).data.status == 'delivered'
+        && request.resource.data.stars is int && request.resource.data.stars >= 1 && request.resource.data.stars <= 5
+        && request.resource.data.polite is bool
+        && request.resource.data.askedMoney is bool
+        && request.resource.data.get('comment', '') is string && request.resource.data.get('comment', '').size() <= 500
+        && request.resource.data.createdAt == request.time;
+      allow update: if false;
       allow delete: if isAdmin();
     }
 
