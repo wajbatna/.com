@@ -1571,7 +1571,17 @@ const DRV2 = {
 };
 const CHAT_CLOSED_STATUS = ["تم التسليم", "ملغى من طرف الزبون", "ملغى من المشرف", "ملغي"];
 
+// يستخرج إحداثيات الزبون من رابط الخريطة المحفوظ فالطلب (https://www.google.com/maps?q=lat,lng)
+function coordsOf(link) {
+  const m = /[?&](?:q|query|ll)=(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)/.exec(link || "") || /@(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)/.exec(link || "");
+  return m ? { lat: +m[1], lng: +m[2] } : null;
+}
 function mountDriverBlock(o) {
+  const box = document.getElementById("driverBlock");
+  try { mountDriverBlockInner(o); }
+  catch (e) { console.error("driver block", e); if (box) box.innerHTML = `<div class="drv-err">${(DRV2[lang] || DRV2.ar).loadErr}</div>`; }
+}
+function mountDriverBlockInner(o) {
   const box = document.getElementById("driverBlock");
   if (!box || !currentUser) return;
   const dt = { ...(DRIVER_TXT[lang] || DRIVER_TXT.ar), ...(DRV2[lang] || DRV2.ar) };
