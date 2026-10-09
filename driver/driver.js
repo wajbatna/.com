@@ -387,6 +387,26 @@ const TOPUP_STATUS = { pending: ["قيد المراجعة", "y"], approved: ["ت
 const TX_LABEL = { topup: "شحن المحفظة", settlement: "تسوية الأرباح / الكاش", adjust: "تعديل من الإدارة" };
 const balanceOf = () => Number(S.wallet?.balance) || 0;
 
+const EYE_ON = `<svg class="e-on" viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3.2" fill="currentColor"/></svg>`;
+const EYE_OFF = `<svg class="e-off" viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><path d="M4 20 20 4"/></svg>`;
+function walShow() {
+  if (S.walShow === undefined) { try { S.walShow = localStorage.getItem("drvWalShow") === "1"; } catch { S.walShow = false; } }
+  return S.walShow;
+}
+function bindWallet() {
+  const w = $("wlt"), eye = $("wEye");
+  if (!w || !eye) return;
+  eye.onclick = () => {
+    S.walShow = !walShow();
+    try { localStorage.setItem("drvWalShow", S.walShow ? "1" : "0"); } catch {}
+    w.classList.toggle("open", S.walShow);
+    eye.setAttribute("aria-pressed", S.walShow);
+    $("wAmt").textContent = S.walShow ? w.dataset.bal : "******";
+    w.querySelectorAll(".wcard b").forEach((b) => (b.textContent = S.walShow ? b.dataset.v : "••••"));
+    if (navigator.vibrate) navigator.vibrate(12);
+  };
+}
+
 function walletHtml() {
   const st = stats(), bal = balanceOf();
   const done = [...S.deliveries.values()].filter((d) => d.status === "delivered").sort((a, b) => b.date.localeCompare(a.date) || (b.deliveredAt?.seconds || 0) - (a.deliveredAt?.seconds || 0)).slice(0, 15);
@@ -394,10 +414,17 @@ function walletHtml() {
   const txs = [...S.txs].sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0)).slice(0, 25);
   const unsettledCash = [...S.deliveries.values()].filter((d) => d.status === "delivered" && d.cod && !d.settledAt).reduce((a, d) => a + (Number(d.collected) || 0), 0);
   const unsettledEarn = [...S.deliveries.values()].filter((d) => d.status === "delivered" && !d.settledAt).reduce((a, d) => a + (Number(d.fee) || 0), 0);
-  return `<div class="big-earn" style="${bal < 0 ? "background:linear-gradient(160deg,#991b1b,#7f1d1d)" : ""}"><span>رصيد المحفظة</span><b>${money(bal)}</b>
-      <span>${bal < 0 ? "عليك مبلغ للإدارة — اشحن محفظتك" : "الرصيد المتوفر"}</span>
-      <button class="btn acc" id="wTopup" type="button" style="margin-top:12px">${ic("plus")} شحن المحفظة</button></div>
-    <div class="stats"><div class="stat"><b>${money(unsettledEarn)}</b><span>أرباح لم تُسوَّ</span></div><div class="stat"><b>${money(unsettledCash)}</b><span>كاش لم يُسلَّم</span></div><div class="stat"><b>${money(st.monthEarn)}</b><span>أرباح الشهر</span></div></div>
+  const show = walShow(), neg = bal < 0;
+  const cards = [["wc1", "أرباح لم تُسوَّ", unsettledEarn], ["wc2", "كاش لم يُسلَّم", unsettledCash], ["wc3", "أرباح الشهر", st.monthEarn]];
+  return `<div class="wlt ${show ? "open" : ""} ${neg ? "neg" : ""}" id="wlt" data-bal="${esc(money(bal))}">
+      <div class="wlt-back"></div>
+      <div class="wlt-cards">${cards.map(([c, l, v]) => `<div class="wcard ${c}"><span>${l}</span><b data-v="${esc(money(v))}">${show ? money(v) : "••••"}</b></div>`).join("")}</div>
+      <div class="wlt-front">
+        <div class="wlt-amt" id="wAmt">${show ? money(bal) : "******"}</div>
+        <div class="wlt-lbl">${neg ? "عليك مبلغ للإدارة — اشحن محفظتك" : "رصيد المحفظة"}</div>
+        <button class="wlt-eye" id="wEye" type="button" aria-label="إظهار / إخفاء الرصيد" aria-pressed="${show}">${EYE_ON}${EYE_OFF}</button>
+      </div></div>
+    <button class="btn acc" id="wTopup" type="button" style="margin:0 0 14px">${ic("plus")} شحن المحفظة</button>
     ${topups.length ? `<div class="h2"><span>طلبات الشحن</span></div><div class="card">${topups.map((t) => { const sl = TOPUP_STATUS[t.status] || ["", ""]; return `<div class="row2"><div><b style="color:var(--tx)">${money(t.amount)}</b><small>${esc(payLabel(t.method))} · ${esc(t.createdAt?.toDate ? t.createdAt.toDate().toLocaleDateString("ar-MA") : "")}${t.adminNote ? " · " + esc(t.adminNote) : ""}</small></div><span class="chip ${sl[1]}">${sl[0]}</span></div>`; }).join("")}</div>` : ""}
     <div class="h2"><span>سجل المحفظة</span></div>
     <div class="card">${txs.length ? txs.map((t) => `<div class="row2"><div><b style="color:var(--tx)">${esc(TX_LABEL[t.type] || t.type)}</b><small>${esc(t.createdAt?.toDate ? t.createdAt.toDate().toLocaleDateString("ar-MA") : "")}${t.note ? " · " + esc(t.note) : ""}</small></div><b style="color:${t.amount < 0 ? "var(--red)" : "var(--p)"}" dir="ltr">${t.amount > 0 ? "+" : ""}${money(t.amount)}</b></div>`).join("") : `<div class="empty" style="padding:18px">ما كاين عمليات بعد.</div>`}</div>
@@ -506,6 +533,7 @@ function renderShell(app) {
   if ($("hWallet")) $("hWallet").onclick = () => { S.tab = "wallet"; render(); };
   if (S.tab === "me") bindProfile();
   if (S.tab === "wallet" && $("wTopup")) $("wTopup").onclick = openTopup;
+  if (S.tab === "wallet") bindWallet();
   if (S.openKey) renderSheet(jobs.find((j) => j.key === S.openKey));
 }
 

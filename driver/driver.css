@@ -127,3 +127,26 @@ button{font-family:inherit;cursor:pointer}
 .copyrow small{display:block;opacity:.75}.copyrow b{word-break:break-all}
 .upl{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;min-height:110px;border:2px dashed var(--line);border-radius:14px;color:var(--mut);font-weight:700;font-size:13px;cursor:pointer;overflow:hidden}
 .upl .drv-i{font-size:30px}.upl img{max-width:100%;max-height:220px;display:block}
+
+/* ───────── محفظة السائق (بطاقات تخرج من الجيب) ───────── */
+.wlt{position:relative;width:min(310px,88%);height:262px;margin:10px auto 18px;-webkit-tap-highlight-color:transparent}
+.wlt-back{position:absolute;inset:92px 0 0;background:#1a2e10;border-radius:30px 30px 46px 46px;box-shadow:0 26px 38px -14px #0a1a0a88,0 8px 14px -6px #0a1a0a66}
+.wlt-cards{position:absolute;inset:0 14px auto;height:150px}
+.wcard{position:absolute;inset-inline:0;height:76px;border-radius:18px;padding:7px 16px;display:flex;justify-content:space-between;align-items:flex-start;font-weight:800;color:#1f2937;box-shadow:0 -2px 8px #0002;border:1.5px solid #ffffff66;transition:transform .55s cubic-bezier(.34,1.45,.5,1);will-change:transform}
+.wcard span{font-size:15px}.wcard b{font-size:14px;font-family:ui-monospace,Menlo,Consolas,monospace;opacity:.7;letter-spacing:.3px}
+.wc1{background:#a9aaf5;top:0;z-index:1;transform:translateY(40px);transition-delay:.12s}
+.wc2{background:#92d86c;top:36px;z-index:2;transform:translateY(30px);transition-delay:.06s}
+.wc3{background:#dcdcdc;top:72px;z-index:3;transform:translateY(12px);transition-delay:0s}
+.wlt.open .wcard{transform:translateY(0)}
+.wlt.open .wc1{transition-delay:0s}.wlt.open .wc2{transition-delay:.06s}.wlt.open .wc3{transition-delay:.12s}
+.wlt-front{position:absolute;inset:112px 0 0;background:#1f3614;border-radius:10px 10px 44px 44px;z-index:5;text-align:center;color:#d7e2cf;padding:18px 10px 0}
+.wlt-front::before{content:"";position:absolute;inset:7px;border:1.5px dashed #ffffff26;border-radius:6px 6px 38px 38px;pointer-events:none}
+.wlt-amt{font-size:30px;font-weight:800;letter-spacing:1px;line-height:1.2;color:#e6efdf;min-height:36px}
+.wlt-lbl{font-size:13px;opacity:.7;margin-top:2px}
+.wlt-eye{position:absolute;inset-inline:0;bottom:14px;margin:auto;width:52px;height:44px;border:0;background:none;color:#8fd66b;display:flex;align-items:center;justify-content:center}
+.wlt-eye svg{position:absolute;transition:opacity .2s,transform .3s}
+.wlt-eye .e-on{opacity:0;transform:scale(.6)}.wlt.open .e-on{opacity:1;transform:none}
+.wlt-eye .e-off{color:#ffffff55}.wlt.open .e-off{opacity:0;transform:scale(.6)}
+.wlt-eye:active svg{transform:scale(.88)}
+.wlt.neg .wlt-amt{color:#fca5a5}.wlt.neg .wlt-lbl{opacity:.95;color:#fecaca;font-weight:700}
+@media (prefers-reduced-motion:reduce){.wcard,.wlt-eye svg{transition:none!important}}
