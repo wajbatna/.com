@@ -2,6 +2,7 @@
 import { ic as drvIc } from "./drvicons.js";
 import "./pw-eye.js";
 import { createLiveRoute, fmtDist, fmtDur } from "./routing.js";
+import { runPhoneGate } from "./phone-verify.js";
 import { RECEIPT_METHODS, compressReceiptImage } from "./receipts.js";
 import { db, auth } from "./firebase.js";
 import { getLang, setLang, t } from "./i18n.js";
@@ -2677,6 +2678,7 @@ async function submitSignup(e) {
     // البيانات الصحيحة هنا مباشرة بدل ما نعتمدو غير على القراءة ديالو
     userProfile = { ...profileData, createdAt: new Date().toISOString(), privacyPolicyAcceptedAt: new Date().toISOString(), lastLoginAt: new Date().toISOString() };
     updateAccountButton();
+    maybeGate(); // تأكيد الرقم عبر واتساب إلا كان مفعّل
   } catch (err) {
     // إلا تخلق حساب Auth وفشل حفظ الملف الشخصي (مثلاً رفض القواعد)، نمسحو الحساب باش ما يبقاش حساب يتيم بلا موافقة
     if (cred && cred.user) {
@@ -3608,6 +3610,40 @@ onSnapshot(
 );
 
 /* ---------- حالة تسجيل الدخول ---------- */
+// بعد الدخول/التسجيل: إغلاق المودال ومتابعة الإجراء المعلّق (طلب/دعم)
+function finishLogin() {
+  document.getElementById("accountModal").classList.remove("show");
+  if (pendingCheckoutAfterLogin) {
+    pendingCheckoutAfterLogin = false;
+    openCheckout();
+  }
+  if (pendingSupportAfterLogin) {
+    pendingSupportAfterLogin = false;
+    openSupport();
+  }
+}
+// تأكيد رقم الهاتف عبر واتساب (إلا فعّلو المشرف) للحسابات الجديدة. كيرجع true إلا بانت شاشة التحقق.
+let phoneGateOn = false, phoneGateBusy = null;
+function maybeGate() {
+  if (phoneGateBusy) return phoneGateBusy;
+  phoneGateBusy = maybeGateInner().finally(() => { phoneGateBusy = null; });
+  return phoneGateBusy;
+}
+async function maybeGateInner() {
+  if (phoneGateOn || !currentUser || !userProfile?.phone) return phoneGateOn;
+  try {
+    const gated = await runPhoneGate({
+      db, user: currentUser, profile: userProfile, lang,
+      container: document.getElementById("accountContent"),
+      openModal: () => document.getElementById("accountModal").classList.add("show"),
+      onDone: () => { phoneGateOn = false; finishLogin(); },
+      onLogout: () => { phoneGateOn = false; signOut(auth); document.getElementById("accountModal").classList.remove("show"); },
+    });
+    phoneGateOn = !!gated;
+    return phoneGateOn;
+  } catch (e) { console.warn("phone gate", e); return false; }
+}
+
 onAuthStateChanged(auth, async (user) => {
   currentUser = user;
   if (user) {
@@ -3652,15 +3688,8 @@ onAuthStateChanged(auth, async (user) => {
       renderCompleteProfile();
     } else {
       // إغلاق مودال الحساب فوراً وإكمال الطلب — ماشي خاصنا ننتظرو بطاقة العضوية باش الدخول يبان سريع
-      document.getElementById("accountModal").classList.remove("show");
-      if (pendingCheckoutAfterLogin) {
-        pendingCheckoutAfterLogin = false;
-        openCheckout();
-      }
-      if (pendingSupportAfterLogin) {
-        pendingSupportAfterLogin = false;
-        openSupport();
-      }
+      const gated = await maybeGate();
+      if (!gated) finishLogin();
     }
     updateAccountButton();
     loadMembership(user.uid); // كيكمل فالخلفية، وكيحدث الزر وحدو ملي يوصل

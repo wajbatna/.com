@@ -28,6 +28,7 @@ import { renderUsersTab, renderPrivacyTab, initAdminExtras } from "./admin-users
 import "./pw-eye.js";
 import { RECEIPT_METHODS } from "./receipts.js";
 import { renderLinksTab, initAdminLinks } from "./admin-links.js";
+import { renderVerifyTab, cleanupVerify, initAdminVerify } from "./admin-verify.js";
 import { renderDriversTab, initAdminDrivers, mountAssignDriver, autoDispatchAfterAccept } from "./admin-drivers.js";
 
 setPersistence(auth, browserLocalPersistence).catch(() => {});
@@ -239,6 +240,7 @@ function renderAdminSidebar() {
     { id: "orders", icon: ico("orders"), label: "الطلبات" },
     { id: "drivers", icon: '<img src="img/drv/scooter.png" alt="" style="width:1.35em;height:1.35em;vertical-align:-.3em;object-fit:contain">', label: "السائقون" },
     { id: "users", icon: ico("customers"), label: "المستخدمون / إدارة الحسابات" },
+    { id: "verify", icon: ico("verify"), label: "التحقق عبر واتساب" },
     { id: "privacy", icon: ico("verify"), label: "سياسة الخصوصية" },
     { id: "links", icon: ico("link-other"), label: "روابطنا / مواقعنا" },
     { id: "loyalty", icon: ico("rewards"), label: "الولاء" },
@@ -342,6 +344,7 @@ function subscribeMeals() {
 
 /* ---------- التبويبات ---------- */
 async function switchTab(tab) {
+  if (tab !== "verify") cleanupVerify();
   if (currentTab === "support" && tab !== "support") {
     openThreadUid = null;
     if (adminChatUnsubscribe) {
@@ -357,6 +360,7 @@ async function switchTab(tab) {
   else if (tab === "drivers") await renderDriversTab(document.getElementById("adminContent"));
   else if (tab === "users") await renderUsersTab(document.getElementById("adminContent"));
   else if (tab === "privacy") await renderPrivacyTab(document.getElementById("adminContent"));
+  else if (tab === "verify") await renderVerifyTab(document.getElementById("adminContent"));
   else if (tab === "links") await renderLinksTab(document.getElementById("adminContent"));
   else if (tab === "loyalty") await renderLoyaltyTab();
   else if (tab === "payments") await renderPaymentsTab();
@@ -1996,6 +2000,7 @@ function stopAndSendAdminVoiceRecording() {
 
 initAdminExtras({ toast, ico });
 initAdminLinks({ toast });
+initAdminVerify({ toast });
 initAdminDrivers({ toast });
 Object.assign(window, { onOrdersSearch, setOrdersFilter, login, logout, switchTab, openSidebar, closeSidebar, navTo, logoutFromMenu, togglePaymentEnabled, openImageLightbox, closeImageLightbox });
 document.getElementById("loginForm").addEventListener("submit", login);
