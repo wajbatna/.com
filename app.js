@@ -1,6 +1,7 @@
 // app.js — منطق الواجهة الأمامية (الزبون) — ثنائي اللغة + حساب + بطاقة العضوية
 import { ic as drvIc } from "./drvicons.js";
 import "./pw-eye.js";
+import { createLiveRoute, fmtDist, fmtDur } from "./routing.js";
 import { RECEIPT_METHODS, compressReceiptImage } from "./receipts.js";
 import { db, auth } from "./firebase.js";
 import { getLang, setLang, t } from "./i18n.js";
@@ -1547,6 +1548,7 @@ function stopDriverTracking() {
   if (driverLiveUnsub) { try { driverLiveUnsub(); } catch (e) {} driverLiveUnsub = null; }
   if (driverAgeTimer) { clearInterval(driverAgeTimer); driverAgeTimer = null; }
   try { driverMap?.remove(); } catch (e) {}
+  try { driverMapMk.route?.clear(); } catch (e) {}
   driverMap = null; driverMapMk = {};
 }
 const DRIVER_TXT = {
@@ -1653,22 +1655,15 @@ function mountDriverBlockInner(o) {
         driverMapMk.fitted = true;
       }
     }
-    // خط متصل بين السائق وعنوان الزبون (كيتحدّث كلما تحرّك السائق) + المسافة
+    // مسار على الطرق بين السائق وعنوان الزبون (خدمة مسارات خارجية، وخط مستقيم كاحتياط) + المسافة والمدة
     if (ll && dest) {
-      const pts = [ll, [dest.lat, dest.lng]];
-      if (driverMapMk.line) { driverMapMk.line.setLatLngs(pts); driverMapMk.casing.setLatLngs(pts); }
-      else {
-        driverMapMk.casing = L.polyline(pts, { color: "#ffffff", weight: 9, opacity: 0.95, lineCap: "round" }).addTo(driverMap);
-        driverMapMk.line = L.polyline(pts, { color: "#059669", weight: 5, opacity: 1, lineCap: "round", lineJoin: "round" }).addTo(driverMap);
-      }
-      const R = 6371000, rad = (x) => (x * Math.PI) / 180;
-      const h = Math.sin(rad(dest.lat - ll[0]) / 2) ** 2 + Math.cos(rad(ll[0])) * Math.cos(rad(dest.lat)) * Math.sin(rad(dest.lng - ll[1]) / 2) ** 2;
-      const m = 2 * R * Math.asin(Math.sqrt(h));
-      const txt = m < 1000 ? `${Math.max(10, Math.round(m / 10) * 10)} ${lang === "fr" ? "m" : "م"}` : `${(m / 1000).toFixed(1)} ${lang === "fr" ? "km" : "كم"}`;
-      q("drvDist").textContent = dt.distLbl(txt);
+      if (!driverMapMk.route) driverMapMk.route = createLiveRoute(driverMap, {
+        onInfo: (r) => { q("drvDist").textContent = dt.distLbl(fmtDist(r.distance, lang) + (r.fallback ? "" : " · " + fmtDur(r.duration, lang))); },
+      });
+      driverMapMk.route.update({ lat: ll[0], lng: ll[1] }, dest);
     } else {
       q("drvDist").textContent = "";
-      if (driverMapMk.line) { driverMap.removeLayer(driverMapMk.line); driverMap.removeLayer(driverMapMk.casing); driverMapMk.line = driverMapMk.casing = null; }
+      if (driverMapMk.route) { driverMapMk.route.clear(); driverMapMk.route = null; }
     }
   };
   driverAgeTimer = setInterval(() => { const a = q("drvAge"); if (a) a.textContent = ageTxt(); }, 10000);

@@ -5,6 +5,7 @@ import {
   onSnapshot, runTransaction, serverTimestamp,
 } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
 import { ic, setIconBase } from "./drvicons.js";
+import { createLiveRoute, fmtDist, fmtDur } from "./routing.js";
 import { CITY_CENTER, cityCells, cellPolygon, cellId, latLngToCell, searchByRings, metersBetween, MAX_SEARCH_RING, HEX_SIZE_M } from "./hexgrid.js";
 
 setIconBase("");
@@ -76,12 +77,13 @@ export async function autoDispatchAfterAccept(order) {
 }
 
 /* ───────────── خريطة السداسيات ───────────── */
-let hexUnsub = null, hexMap = null;
-function cleanupHex() { try { hexUnsub?.(); } catch (e) {} hexUnsub = null; try { hexMap?.remove(); } catch (e) {} hexMap = null; }
+let hexUnsub = null, hexMap = null, supWatch = null, supRoute = null;
+function cleanupHex() { try { hexUnsub?.(); } catch (e) {} hexUnsub = null; try { supRoute?.clear(); } catch (e) {} supRoute = null; if (supWatch != null) { try { navigator.geolocation.clearWatch(supWatch); } catch (e) {} supWatch = null; } try { hexMap?.remove(); } catch (e) {} hexMap = null; }
 
 function mountHexMap(box) {
   if (!window.L) { box.innerHTML = `<div class="empty">تعذر تحميل مكتبة الخريطة (Leaflet). تأكد من الاتصال بالإنترنت.</div>`; return; }
-  box.innerHTML = `<div id="hexMap" style="height:380px;border-radius:14px;overflow:hidden;z-index:1"></div>
+  box.innerHTML = `<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px"><button type="button" id="supShare" class="btn" style="padding:8px 14px">📍 شارك موقعي (المشرف)</button><span id="supInfo" style="font-size:12.5px;color:#475569">اضغط على سائق في الخريطة لرسم المسار إليك على الطرق.</span></div>
+    <div id="hexMap" style="height:380px;border-radius:14px;overflow:hidden;z-index:1"></div>
     <div id="hexInfo" style="font-size:13px;color:#475569;margin-top:8px;line-height:1.7"></div>`;
   const L = window.L;
   const map = (hexMap = L.map("hexMap", { zoomControl: true, attributionControl: false }).setView([CITY_CENTER.lat, CITY_CENTER.lng], 13));
@@ -112,8 +114,9 @@ function mountHexMap(box) {
       const age = Math.max(0, Math.round((Date.now() - d.lastLoc.at) / 1000));
       const html = `<b>${esc(d.name)}</b><br><span dir="ltr">${esc(d.phone)}</span><br>السداسي: ${esc(cid)}<br>آخر تحديث: منذ ${age} ثانية`;
       if (markers.has(d.id)) { markers.get(d.id).setLatLng(ll).setPopupContent(html); }
-      else markers.set(d.id, L.marker(ll, { icon: mIcon(d.name) }).addTo(map).bindPopup(html));
+      else { const mk = L.marker(ll, { icon: mIcon(d.name) }).addTo(map).bindPopup(html); mk.on("click", () => { selId = d.id; try { supRoute?.clear(); } catch (e) {} supRoute = null; if (!supLoc) supInfo.textContent = "اضغط «شارك موقعي» أولاً ليظهر المسار بينك وبين السائق."; else routeToDriver(); }); markers.set(d.id, mk); }
     }
+    if (selId) routeToDriver();
     for (const [id, m] of markers) if (!seen.has(id)) { map.removeLayer(m); markers.delete(id); }
     polys.forEach((p, id) => { const n = counts.get(id) || 0; p.setStyle({ fillOpacity: n ? 0.28 + Math.min(0.4, n * 0.12) : 0, weight: n ? 2 : 1, color: n ? "#b45309" : "#64748b" }); });
     if (!testPin) info.innerHTML = `${ic("hex")} <b>${polys.size}</b> سداسي (نصف القطر ${HEX_SIZE_M} م) · سائقون متصلون: <b>${live.length}</b> · الموقع كيتحدّث كل 5 ثواني.<br><span style="color:#78716c">اضغط على أي نقطة فالخريطة باش تجرب البحث عن أقرب سائق (سداسي الزبون ← الست المجاورين ← الحلقات اللي بعدهم).</span>`;
@@ -129,6 +132,33 @@ function mountHexMap(box) {
       ? `${ic("search")} سداسي النقطة <b>${esc(oc)}</b> ← أول سائق لقيتو فـ <b>${r.ring === 0 ? "نفس السداسي" : "الحلقة " + r.ring}</b>: <b>${esc(r.driver.name)}</b> (على بعد ${Math.round(metersBetween(dest, r.driver))} م) · عدد المرشحين فهاد الحلقة: ${r.candidates}`
       : `${ic("search")} سداسي النقطة <b>${esc(oc)}</b> ← ما لقيت حتى سائق متصل فنطاق ${MAX_SEARCH_RING} حلقة.`;
   });
+  // ── موقع المشرف + المسار بينه وبين السائق (على الطرق) ──
+  let supLoc = null, supMk = null, selId = null, lastPush = 0;
+  const supInfo = box.querySelector("#supInfo");
+  const supIcon = L.divIcon({ className: "", iconSize: [38, 38], iconAnchor: [19, 19], html: `<div style="width:38px;height:38px;border-radius:50%;background:#7c3aed;color:#fff;display:flex;align-items:center;justify-content:center;font-size:20px;border:3px solid #fff;box-shadow:0 3px 8px #0006">${ic("user")}</div>` });
+  const drawSup = () => {
+    if (!supLoc) return;
+    if (supMk) supMk.setLatLng([supLoc.lat, supLoc.lng]); else supMk = L.marker([supLoc.lat, supLoc.lng], { icon: supIcon, zIndexOffset: 500 }).addTo(map).bindPopup("المشرف (أنت)");
+  };
+  const routeToDriver = () => {
+    const d = live.find((x) => x.id === selId);
+    if (!d || !supLoc) return;
+    if (!supRoute) supRoute = createLiveRoute(map, { color: "#7c3aed", onInfo: (r) => { supInfo.innerHTML = `<b>${esc(d.name)}</b> ← المشرف: ${fmtDist(r.distance)}${r.fallback ? " (خط مستقيم)" : " · " + fmtDur(r.duration)}`; } });
+    supRoute.update({ lat: d.lastLoc.lat, lng: d.lastLoc.lng }, supLoc);
+  };
+  map.on("popupclose", () => { selId = null; try { supRoute?.clear(); } catch (e) {} supRoute = null; });
+  box.querySelector("#supShare").onclick = (ev) => {
+    const btn = ev.currentTarget;
+    if (supWatch != null) { navigator.geolocation.clearWatch(supWatch); supWatch = null; btn.textContent = "📍 شارك موقعي (المشرف)"; deleteDoc(doc(db, "supervisorLive", "main")).catch(() => {}); return; }
+    if (!navigator.geolocation) { ctx.toast("المتصفح لا يدعم تحديد الموقع"); return; }
+    btn.textContent = "⏹ إيقاف مشاركة موقعي";
+    supWatch = navigator.geolocation.watchPosition((p) => {
+      supLoc = { lat: +p.coords.latitude.toFixed(6), lng: +p.coords.longitude.toFixed(6), at: Date.now() };
+      drawSup(); routeToDriver();
+      if (!supMk._fit) { supMk._fit = true; map.setView([supLoc.lat, supLoc.lng], 14); }
+      if (Date.now() - lastPush > 8000) { lastPush = Date.now(); setDoc(doc(db, "supervisorLive", "main"), { lat: supLoc.lat, lng: supLoc.lng, at: supLoc.at, updatedAt: serverTimestamp() }).catch((e) => console.warn("supervisorLive", e)); }
+    }, () => { ctx.toast("تعذر الحصول على موقعك (اسمح بالموقع في المتصفح)"); btn.textContent = "📍 شارك موقعي (المشرف)"; supWatch = null; }, { enableHighAccuracy: true, maximumAge: 5000, timeout: 20000 });
+  };
   hexUnsub = onSnapshot(query(collection(db, "drivers"), where("status", "==", "active")), (snap) => {
     if (!document.getElementById("hexMap")) { cleanupHex(); return; } // خرجنا من التاب
     refresh(snap.docs);
