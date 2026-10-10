@@ -11,6 +11,7 @@ import {
 
 import { ic, setIconBase } from "../drvicons.js";
 import { compressReceiptImage } from "../receipts.js";
+import { createLiveRoute, fmtDist, fmtDur } from "../routing.js";
 setIconBase("../");
 
 setPersistence(auth, browserLocalPersistence).catch(() => {});
@@ -67,7 +68,7 @@ const S = {
   tab: "home", jobsSeg: "today", openKey: null,
   orders: new Map(), deliveries: new Map(), fee: 0,
   wallet: null, txs: [], topups: [], payCfg: {}, chats: new Map(), reviews: [], navPop: null,
-  pos: null, busy: false, offline: !navigator.onLine,
+  pos: null, sup: null, busy: false, offline: !navigator.onLine,
 };
 let unsubs = [];
 let firstOrdersSnap = true;
@@ -636,7 +637,7 @@ function openChat(job) {
 
 /* ───────────── ورقة تفاصيل الطلب ───────────── */
 let map = null, mapMarkers = {};
-function destroyMap() { try { map?.remove(); } catch (e) {} map = null; mapMarkers = {}; }
+function destroyMap() { try { map?.remove(); } catch (e) {} map = null; mapMarkers = {}; window.__mapUpdate = null; }
 function renderSheet(job) {
   const host = $("sheetHost");
   if (!job) { S.openKey = null; destroyMap(); host.innerHTML = ""; return; }
@@ -699,11 +700,43 @@ function setupMap(o) {
   L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19 }).addTo(map);
   const dot = (name, bg) => L.divIcon({ html: `<div style="width:34px;height:34px;border-radius:50%;background:${bg};color:#fff;display:flex;align-items:center;justify-content:center;font-size:20px;border:3px solid #fff;box-shadow:0 3px 8px #0006">${ic(name)}</div>`, className: "", iconSize: [34, 34], iconAnchor: [17, 17] });
   if (dest) mapMarkers.dest = L.marker([dest.lat, dest.lng], { icon: dot("pin", "#dc2626") }).addTo(map);
+  // شريط أعلى الخريطة: تبديل الوجهة (الزبون / المشرف) + المسافة والمدة
+  let target = "customer";
+  const bar = document.createElement("div");
+  bar.style.cssText = "position:absolute;z-index:1000;top:8px;left:8px;right:8px;display:flex;gap:6px;align-items:center;pointer-events:none;direction:rtl";
+  bar.innerHTML = `<button type="button" data-t="customer" style="pointer-events:auto"></button><button type="button" data-t="sup" style="pointer-events:auto"></button><b id="mapInfo" style="margin-inline-start:auto;background:#fff;color:#064e3b;border-radius:10px;padding:5px 10px;font-size:12px;box-shadow:0 2px 6px #0003"></b>`;
+  const sty = (on) => `border:0;border-radius:10px;padding:6px 11px;font:800 12px inherit;font-family:inherit;box-shadow:0 2px 6px #0003;cursor:pointer;background:${on ? "#064e3b" : "#fff"};color:${on ? "#fff" : "#064e3b"}`;
+  const btns = bar.querySelectorAll("button");
+  btns[0].textContent = "🏠 الزبون"; btns[1].textContent = "🧭 المشرف";
+  el.style.position = "relative"; el.appendChild(bar);
+  const info = bar.querySelector("#mapInfo");
+  let route = null, supMk = null;
+  const supPos = () => (S.sup && Date.now() - (S.sup.at || 0) < 6 * 3600 * 1000 ? S.sup : null);
+  const tgtPos = () => (target === "sup" ? supPos() : dest);
+  const paint = () => {
+    btns[0].style.cssText = sty(target === "customer"); btns[1].style.cssText = sty(target === "sup");
+    btns[1].style.display = supPos() ? "" : "none";
+  };
+  const reroute = () => {
+    route?.clear(); route = null; info.textContent = "";
+    if (target === "sup" && !supPos()) { target = "customer"; }
+    paint(); window.__mapUpdate();
+  };
+  btns.forEach((b) => (b.onclick = () => { target = b.dataset.t; mapMarkers.fitted = false; reroute(); }));
   window.__mapUpdate = () => {
-    if (!map || !S.pos) return;
-    const ll = [S.pos.lat, S.pos.lng];
+    if (!map) return;
+    const sp = supPos();
+    if (sp) { if (supMk) supMk.setLatLng([sp.lat, sp.lng]); else supMk = L.marker([sp.lat, sp.lng], { icon: dot("user", "#7c3aed") }).addTo(map); }
+    else if (supMk) { map.removeLayer(supMk); supMk = null; }
+    paint();
+    if (!S.pos) return;
+    const ll = [S.pos.lat, S.pos.lng], to = tgtPos();
     if (mapMarkers.me) mapMarkers.me.setLatLng(ll); else mapMarkers.me = L.marker(ll, { icon: dot("scooter", "#064e3b") }).addTo(map);
-    if (dest && !mapMarkers.fitted) { map.fitBounds([ll, [dest.lat, dest.lng]], { padding: [34, 34], maxZoom: 16 }); mapMarkers.fitted = true; }
+    if (to && !mapMarkers.fitted) { map.fitBounds([ll, [to.lat, to.lng]], { padding: [48, 48], maxZoom: 16 }); mapMarkers.fitted = true; }
+    if (to) {
+      if (!route) route = createLiveRoute(map, { color: target === "sup" ? "#7c3aed" : "#059669", onInfo: (r) => { info.textContent = fmtDist(r.distance) + (r.fallback ? "" : " · " + fmtDur(r.duration)); } });
+      route.update({ lat: ll[0], lng: ll[1] }, to);
+    }
   };
   window.__mapUpdate();
   setTimeout(() => map?.invalidateSize(), 250);
@@ -733,6 +766,8 @@ function failSheet(job) {
 function stopListeners() { unsubs.forEach((u) => { try { u(); } catch (e) {} }); unsubs = []; firstOrdersSnap = true; }
 function startListeners(uid) {
   stopListeners();
+  // موقع المشرف المباشر (يشاركه المشرف من لوحته) لرسم المسار إليه
+  unsubs.push(onSnapshot(doc(db, "supervisorLive", "main"), (d) => { S.sup = d.exists() ? d.data() : null; window.__mapUpdate?.(); }, () => {}));
   // الطلبات المعيّنة لهاد السائق + التنبيه على الجديد
   unsubs.push(onSnapshot(query(collection(db, "orders"), where("driverId", "==", uid)), (snap) => {
     const seen = getSeen(); let fresh = [];
