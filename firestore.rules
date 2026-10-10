@@ -83,6 +83,8 @@ service cloud.firestore {
         || (docId == 'loyaltyProgram' && validLoyaltyProgram(d))
         || (docId == 'weeklyPackagePrices' && validWeeklyPackagePrices(d))
         || (docId == 'privacyPolicy' && validPrivacyPolicyConfig(d))
+        || (docId == 'whatsappVerify' && d.keys().hasOnly(['enabled', 'auto', 'number', 'enabledAt', 'updatedAt', 'updatedBy'])
+            && d.enabled is bool && d.get('auto', false) is bool && d.number is string && d.number.size() <= 20)
         || (docId == 'driverSettings' && d.feePerDelivery is number && d.feePerDelivery >= 0 && d.feePerDelivery <= 10000);
     }
 
@@ -148,7 +150,7 @@ service cloud.firestore {
     // 6 وثائق فقط كيقراوها الزبناء (بلا تسجيل دخول): dailyMeal / paymentMethods / pointsRules / loyaltyProgram / weeklyPackagePrices / privacyPolicy.
     // أي وثيقة أخرى فـ config: الأدمين فقط. الكتابة: الأدمين فقط مع فحص القيم.
     match /config/{docId} {
-      allow get: if docId in ['dailyMeal', 'paymentMethods', 'pointsRules', 'loyaltyProgram', 'weeklyPackagePrices', 'privacyPolicy'];
+      allow get: if docId in ['dailyMeal', 'paymentMethods', 'pointsRules', 'loyaltyProgram', 'weeklyPackagePrices', 'privacyPolicy', 'whatsappVerify'];
       allow get: if docId == 'driverSettings' && isActiveDriver();
       allow read: if isAdmin();
       allow create, update: if isAdmin() && validConfig(docId, request.resource.data);
@@ -913,6 +915,41 @@ service cloud.firestore {
         && request.resource.data.lng is number && request.resource.data.lng >= -180 && request.resource.data.lng <= 180
         && request.resource.data.at is number
         && request.resource.data.updatedAt == request.time;
+      allow delete: if isAdmin();
+    }
+
+    // ───────────── التحقق من رقم الهاتف عبر واتساب ─────────────
+    // verifyCodes: مخزن رموز (6 أرقام) كيضيفها المشرف؛ ما كيقراها غير هو (الزبون عمرو كيشوف الرمز، غير القواعد كتقارنو).
+    // phoneVerifications/{uid}: طلب تحقق الزبون. المشرف كيعيّن ليه رمز (codeId) ويبعثو بواتساب، والزبون كيدخل الرمز
+    // فكيتحوّل status لـ verified فقط إلا كان attempt == الرمز المعيّن (المقارنة كدير فالقواعد، ماشي فالمتصفح).
+    match /verifyCodes/{codeId} {
+      allow read, delete: if isAdmin();
+      allow create, update: if isAdmin()
+        && request.resource.data.keys().hasOnly(['code', 'createdAt', 'assignedTo', 'assignedAt'])
+        && request.resource.data.keys().hasAll(['code', 'createdAt'])
+        && request.resource.data.code is string && request.resource.data.code.matches('^[0-9]{6}$');
+    }
+
+    match /phoneVerifications/{uid} {
+      allow read: if isAdmin() || isOwner(uid);
+      allow create: if isOwner(uid)
+        && request.resource.data.keys().hasOnly(['phone', 'status', 'requestedAt'])
+        && request.resource.data.status == 'pending'
+        && request.resource.data.phone is string && request.resource.data.phone.size() <= 20
+        && request.resource.data.requestedAt == request.time;
+      allow update: if (isOwner(uid) && resource.data.status == 'pending' && (
+            // إعادة طلب الرمز
+            (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['requestedAt'])
+              && request.resource.data.requestedAt == request.time)
+            // إدخال الرمز
+            || (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'verifiedAt', 'attempt'])
+              && request.resource.data.status == 'verified'
+              && request.resource.data.verifiedAt == request.time
+              && resource.data.get('codeId', '') != ''
+              && request.resource.data.attempt == get(/databases/$(database)/documents/verifyCodes/$(resource.data.codeId)).data.code)))
+        || (isAdmin()
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['codeId', 'sentAt', 'status', 'verifiedAt', 'manual', 'sendError'])
+            && request.resource.data.status in ['pending', 'verified']);
       allow delete: if isAdmin();
     }
 
