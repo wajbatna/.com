@@ -902,6 +902,20 @@ service cloud.firestore {
       allow delete: if isAdmin() || (isSignedIn() && resource.data.driverId == request.auth.uid);
     }
 
+    // ───────────── موقع المشرف المباشر (supervisorLive) ─────────────
+    // المشرف (من خريطة السائقين) يشارك موقعو فوثيقة وحدة "main"؛ السائقون المفعّلون كيقراوها باش يرسمو المسار ليه على الخريطة.
+    match /supervisorLive/{docId} {
+      allow read: if isAdmin() || isActiveDriver();
+      allow create, update: if isAdmin() && docId == 'main'
+        && request.resource.data.keys().hasOnly(['lat', 'lng', 'at', 'updatedAt'])
+        && request.resource.data.keys().hasAll(['lat', 'lng', 'at', 'updatedAt'])
+        && request.resource.data.lat is number && request.resource.data.lat >= -90 && request.resource.data.lat <= 90
+        && request.resource.data.lng is number && request.resource.data.lng >= -180 && request.resource.data.lng <= 180
+        && request.resource.data.at is number
+        && request.resource.data.updatedAt == request.time;
+      allow delete: if isAdmin();
+    }
+
     // ───────────── تقييم السائق (driverReviews) ─────────────
     // معرّف الوثيقة = معرّف التوصيلة (<orderId>_<YYYY-MM-DD>). الزبون صاحب التوصيلة يقيّم مرة وحدة بعد حالة delivered:
     // نجوم 1..5 + هل كان مهذباً + هل طلب زيادة مال + تعليق اختياري. ما كيتبدلش.
