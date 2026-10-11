@@ -3,6 +3,7 @@ import { ic as drvIc } from "./drvicons.js";
 import "./pw-eye.js";
 import { createLiveRoute, fmtDist, fmtDur } from "./routing.js";
 import { runPhoneGate } from "./phone-verify.js";
+import { initWallet, openWallet, closeWallet, walletWatch, walletUnwatch, walletOn, placeWalletOrder, WS as WALLET } from "./wallet.js";
 import { RECEIPT_METHODS, compressReceiptImage } from "./receipts.js";
 import { db, auth } from "./firebase.js";
 import { getLang, setLang, t } from "./i18n.js";
@@ -59,6 +60,7 @@ const PAYMENT_METHODS = [
   { id: "wafacash", icon: "💰", img: "img/payments/wafacash.jpg" },
   { id: "tijari", icon: "🏛", img: "img/payments/tijari.jpg" },
   { id: "baridbank", icon: "📮", img: "img/payments/baridbank.jpg" },
+  { id: "wallet", icon: "👛", img: "" },
 ];
 // كيرجع HTML ديال أيقونة طريقة الأداء: تصويرة الشركة إلا كانت، وإلا الإيموجي كـ fallback
 function paymentIconHtml(pm) {
@@ -598,6 +600,14 @@ function renderSidebar() {
     </button>`);
   }
 
+  if (currentUser && walletOn()) {
+    const wTxt = lang === "fr" ? "Portefeuille" : "المحفظة";
+    items.push(`<button type="button" class="side-item" onclick="openSidebarAction('openWallet')">
+      <span class="side-icon">${sideImg("money")}</span>
+      <span class="side-label">${wTxt}</span>
+    </button>`);
+  }
+
   if (currentUser && membershipData) {
     const memText = lang === "fr" ? "Carte de membre" : "بطاقة العضوية";
     items.push(`<button type="button" class="side-item" onclick="openSidebarAction('openMembership')">
@@ -906,7 +916,7 @@ function closeCheckout() {
 }
 /* ---------- طريقة الأداء ---------- */
 function enabledPaymentMethods() {
-  return PAYMENT_METHODS.filter((pm) => (paymentMethodsConfig[pm.id]?.enabled ?? true) !== false);
+  return PAYMENT_METHODS.filter((pm) => (pm.id === "wallet" ? !!currentUser && walletOn() : (paymentMethodsConfig[pm.id]?.enabled ?? true) !== false));
 }
 function paymentMethodBoxHtml() {
   const s = t(lang);
@@ -925,11 +935,12 @@ function paymentMethodBoxHtml() {
              (pm) =>
                `<button type="button" class="pay-item ${paymentMethod === pm.id ? "active" : ""}" aria-pressed="${paymentMethod === pm.id}" onclick="selectPaymentMethod('${pm.id}')">${paymentIconHtml(pm)} ${
                  s.paymentMethods[pm.id]
-               }</button>`
+               }${pm.id === "wallet" ? ` <small style="opacity:.75">(${walletBalLabel()})</small>` : ""}</button>`
            )
            .join("")}</div>`
        : ""
    }
+   ${paymentMethod === "wallet" ? walletPayNoticeHtml() : ""}
    ${
      cfg && (cfg.rib || cfg.holder || cfg.note)
        ? `<div class="notice pay-info" style="margin-top:10px">
@@ -954,6 +965,19 @@ function paymentMethodBoxHtml() {
      </div>`
        : ""
    }`;
+}
+function walletBalLabel() {
+  return `${WALLET.balance.toFixed(2)} ${lang === "fr" ? "DH" : "د.م."}`;
+}
+function walletPayNoticeHtml() {
+  const total = checkoutTotal();
+  const ok = WALLET.balance + 0.0001 >= total;
+  const fr = lang === "fr";
+  return `<div class="notice" style="margin-top:10px;${ok ? "" : "background:#fef2f2;border-color:#fecaca"}">
+    <b>${fr ? "Votre solde" : "رصيدك"}: ${walletBalLabel()}</b>
+    <div style="margin-top:4px;font-size:13px">${ok ? (fr ? `Le montant de la commande (${total.toFixed(2)} DH) sera déduit du portefeuille.` : `سيُخصم مبلغ الطلب (${total.toFixed(2)} د.م.) من محفظتك.`) : (fr ? "Solde insuffisant — rechargez votre portefeuille ou choisissez un autre mode." : "رصيدك غير كافٍ — اشحن محفظتك أو اختر طريقة أخرى.")}</div>
+    ${ok ? "" : `<button type="button" class="copy-btn" style="margin-top:8px" onclick="closeCheckout();openWallet()">${fr ? "Recharger" : "شحن المحفظة"}</button>`}
+  </div>`;
 }
 function togglePaymentPicker() {
   paymentPickerOpen = !paymentPickerOpen;
@@ -1220,6 +1244,10 @@ async function submitOrder(e) {
     toast(s.paymentMethodRequired, "error");
     return;
   }
+  if (paymentMethod === "wallet" && WALLET.balance + 0.0001 < checkoutTotal()) {
+    toast(lang === "fr" ? "Solde du portefeuille insuffisant" : "رصيد المحفظة غير كافٍ", "error");
+    return;
+  }
 
   const submitBtn = e.target.querySelector('button[type="submit"]');
   if (submitBtn) {
@@ -1256,7 +1284,7 @@ async function submitOrder(e) {
   };
 
   try {
-    const ref = await addDoc(collection(db, "orders"), order);
+    const ref = paymentMethod === "wallet" ? await placeWalletOrder(order) : await addDoc(collection(db, "orders"), order);
     await maybeCreateMembership(order, ref.id);
     if (currentUser) {
       await awardOrderPoints(currentUser.uid, order, ref.id);
@@ -3446,6 +3474,8 @@ Object.assign(window, { filterMyOrders,
   renewSubscription,
   openRewards,
   closeRewards,
+  openWallet,
+  closeWallet,
   copyReferralLink,
   redeemReward,
   openMyOrders,
@@ -3610,6 +3640,19 @@ onSnapshot(
 );
 
 /* ---------- حالة تسجيل الدخول ---------- */
+initWallet({
+  db,
+  lang: () => lang,
+  user: () => currentUser,
+  profile: () => userProfile,
+  toast: (m, tp) => toast(m, tp),
+  esc: (x) => escapeHtml(x),
+  fetchPointsSummary,
+  openAccount: () => openAccount(),
+  payCfg: () => paymentMethodsConfig,
+  onChange: () => { try { renderSidebar(); const el = document.getElementById("paymentMethodPicker"); if (el) el.innerHTML = paymentMethodBoxHtml(); } catch (e) {} },
+});
+
 // بعد الدخول/التسجيل: إغلاق المودال ومتابعة الإجراء المعلّق (طلب/دعم)
 function finishLogin() {
   document.getElementById("accountModal").classList.remove("show");
@@ -3695,6 +3738,7 @@ onAuthStateChanged(auth, async (user) => {
     loadMembership(user.uid); // كيكمل فالخلفية، وكيحدث الزر وحدو ملي يوصل
     watchUnreadMessages(user.uid);
     watchDriverRatings(user.uid);
+    walletWatch(user);
     maybeRequirePolicyReaccept();
   } else {
     userProfile = null;
@@ -3702,6 +3746,7 @@ onAuthStateChanged(auth, async (user) => {
     profileIncomplete = false;
     stopWatchingUnreadMessages();
     stopDriverRatings();
+    walletUnwatch();
   }
   updateAccountButton();
 });
