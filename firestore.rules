@@ -83,6 +83,11 @@ service cloud.firestore {
         || (docId == 'loyaltyProgram' && validLoyaltyProgram(d))
         || (docId == 'weeklyPackagePrices' && validWeeklyPackagePrices(d))
         || (docId == 'privacyPolicy' && validPrivacyPolicyConfig(d))
+        || (docId == 'walletSettings' && d.keys().hasOnly(['enabled', 'convertEnabled', 'pointsPerDirham', 'minPoints', 'maxPoints', 'topupMin', 'topupMax', 'updatedAt', 'updatedBy'])
+            && d.enabled is bool && d.get('convertEnabled', true) is bool
+            && d.pointsPerDirham is number && d.pointsPerDirham >= 1 && d.pointsPerDirham <= 100000
+            && d.minPoints is number && d.minPoints >= 1 && d.maxPoints is number && d.maxPoints >= d.minPoints && d.maxPoints <= 1000000
+            && d.topupMin is number && d.topupMin >= 1 && d.topupMax is number && d.topupMax >= d.topupMin && d.topupMax <= 1000000)
         || (docId == 'whatsappVerify' && d.keys().hasOnly(['enabled', 'auto', 'number', 'enabledAt', 'updatedAt', 'updatedBy'])
             && d.enabled is bool && d.get('auto', false) is bool && d.number is string && d.number.size() <= 20)
         || (docId == 'driverSettings' && d.feePerDelivery is number && d.feePerDelivery >= 0 && d.feePerDelivery <= 10000);
@@ -150,7 +155,7 @@ service cloud.firestore {
     // 6 وثائق فقط كيقراوها الزبناء (بلا تسجيل دخول): dailyMeal / paymentMethods / pointsRules / loyaltyProgram / weeklyPackagePrices / privacyPolicy.
     // أي وثيقة أخرى فـ config: الأدمين فقط. الكتابة: الأدمين فقط مع فحص القيم.
     match /config/{docId} {
-      allow get: if docId in ['dailyMeal', 'paymentMethods', 'pointsRules', 'loyaltyProgram', 'weeklyPackagePrices', 'privacyPolicy', 'whatsappVerify'];
+      allow get: if docId in ['dailyMeal', 'paymentMethods', 'pointsRules', 'loyaltyProgram', 'weeklyPackagePrices', 'privacyPolicy', 'whatsappVerify', 'walletSettings'];
       allow get: if docId == 'driverSettings' && isActiveDriver();
       allow read: if isAdmin();
       allow create, update: if isAdmin() && validConfig(docId, request.resource.data);
@@ -181,7 +186,7 @@ service cloud.firestore {
 
     function validOrder(d) {
       return d.keys().hasOnly(['uid', 'customer', 'schedule', 'plan', 'durationDays', 'paymentMethod',
-                               'paymentMethodLabel', 'deliveryLocation', 'mealType', 'lang', 'items', 'total', 'status', 'createdAt'])
+                               'paymentMethodLabel', 'deliveryLocation', 'mealType', 'lang', 'items', 'total', 'status', 'createdAt', 'walletPaid'])
         && d.keys().hasAll(['uid', 'customer', 'schedule', 'plan', 'durationDays', 'paymentMethod',
                             'paymentMethodLabel', 'deliveryLocation', 'mealType', 'lang', 'items', 'total', 'status', 'createdAt'])
         && d.uid == request.auth.uid
@@ -189,7 +194,8 @@ service cloud.firestore {
         && validOrderSchedule(d.schedule)
         && d.plan in ['daily', 'weekly', 'monthly']
         && d.durationDays is number && d.durationDays >= 1 && d.durationDays <= 3650
-        && d.paymentMethod in ['card', 'cod', 'tpe', 'cih', 'fellah', 'cashplus', 'wafacash', 'tijari', 'baridbank']
+        && d.paymentMethod in ['card', 'cod', 'tpe', 'cih', 'fellah', 'cashplus', 'wafacash', 'tijari', 'baridbank', 'wallet']
+        && (d.paymentMethod == 'wallet' || d.get('walletPaid', false) == false)
         && d.paymentMethodLabel is string && d.paymentMethodLabel.size() <= 200
         && d.deliveryLocation in ['home', 'work']
         && d.mealType in ['lunch', 'dinner']
@@ -288,7 +294,7 @@ service cloud.firestore {
     match /orders/{orderId} {
       allow read: if isAdmin() || (isSignedIn() && resource.data.uid == request.auth.uid)
         || (isActiveDriver() && resource.data.driverId == request.auth.uid);
-      allow create: if isSignedIn() && validOrder(request.resource.data);
+      allow create: if isSignedIn() && validOrder(request.resource.data) && walletOrderOk(orderId, request.resource.data);
       allow update: if isAdmin() || ownerCanReview() || ownerCanCancel() || driverCanMarkOrder();
       allow delete: if isAdmin();
     }
@@ -476,7 +482,12 @@ service cloud.firestore {
         || (request.resource.data.uid == request.auth.uid
             && request.resource.data.points != 0
             && request.resource.data.points >= -100000
-            && request.resource.data.points <= 100000)
+            && request.resource.data.points <= 1000
+            // نقاط موجبة (مكافأة) لازم ترتبط بطلب حقيقي ديال نفس الزبون — باش ما يقدرش يصنع نقاط من العدم
+            && (request.resource.data.points < 0
+                || (request.resource.data.orderId is string
+                    && exists(/databases/$(database)/documents/orders/$(request.resource.data.orderId))
+                    && get(/databases/$(database)/documents/orders/$(request.resource.data.orderId)).data.uid == request.auth.uid)))
         || validReferralAward(logId, request.resource.data)
       );
       allow update, delete: if false;
@@ -951,6 +962,142 @@ service cloud.firestore {
             && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['codeId', 'sentAt', 'status', 'verifiedAt', 'manual', 'sendError'])
             && request.resource.data.status in ['pending', 'verified']);
       allow delete: if isAdmin();
+    }
+
+    // ───────────── محفظة الزبون (customerWallets / customerTx / customerTopups / pointsConversions) ─────────────
+    // مبدأ الأمان: الزبون ما كيقدرش يزيد فرصيدو أبداً. الزيادة (شحن/تحويل نقاط/استرداد/تعديل) كيديرها المشرف فقط،
+    // والزبون كيقدر غير ينقص رصيدو وهو كيدفع طلب (type=order) بنفس مبلغ الطلب. كل تغيير فالرصيد خاصو سجل فـ customerTx
+    // فنفس العملية (batch) ومبلغو == الفرق فالرصيد (كنتحقق منو بـ getAfter).
+    function walletTxAfter(txId) {
+      return getAfter(/databases/$(database)/documents/customerTx/$(txId)).data;
+    }
+    function near(a, b) { return a - b < 0.01 && b - a < 0.01; }
+    function walletSettings() { return get(/databases/$(database)/documents/config/walletSettings).data; }
+
+    function walletOrderOk(orderId, d) {
+      return d.paymentMethod != 'wallet'
+        || (d.get('walletPaid', false) == true
+            && d.uid == request.auth.uid
+            && walletTxAfter('ord_' + orderId).uid == request.auth.uid
+            && walletTxAfter('ord_' + orderId).type == 'order'
+            && walletTxAfter('ord_' + orderId).ref == orderId
+            && near(walletTxAfter('ord_' + orderId).amount, -d.total)
+            && walletSettings().enabled == true);
+    }
+
+    function walletSelfSpend(uid) {
+      return request.resource.data.keys().hasOnly(['balance', 'updatedAt', 'lastTx', 'phone'])
+        && request.resource.data.phone == resource.data.get('phone', request.resource.data.phone)
+        && request.resource.data.updatedAt == request.time
+        && request.resource.data.balance is number && request.resource.data.balance >= 0
+        && request.resource.data.balance < resource.data.balance
+        && request.resource.data.lastTx is string
+        && request.resource.data.lastTx.matches('^ord_.+')
+        && walletTxAfter(request.resource.data.lastTx).uid == uid
+        && walletTxAfter(request.resource.data.lastTx).type == 'order'
+        && near(walletTxAfter(request.resource.data.lastTx).amount, request.resource.data.balance - resource.data.balance);
+    }
+    function walletAdminOk(uid, oldBal) {
+      return request.resource.data.keys().hasOnly(['balance', 'updatedAt', 'lastTx', 'phone'])
+        && request.resource.data.updatedAt == request.time
+        && request.resource.data.balance is number
+        && request.resource.data.lastTx is string
+        && walletTxAfter(request.resource.data.lastTx).uid == uid
+        && walletTxAfter(request.resource.data.lastTx).type in ['topup', 'points', 'refund', 'adjust']
+        && walletTxAfter(request.resource.data.lastTx).createdBy == request.auth.uid
+        && near(walletTxAfter(request.resource.data.lastTx).amount, request.resource.data.balance - oldBal);
+    }
+
+    match /customerWallets/{uid} {
+      allow get: if isOwner(uid) || isAdmin();
+      allow list: if isAdmin();
+      allow create: if (isOwner(uid) && !isBannedUser(uid)
+            && request.resource.data.keys().hasOnly(['balance', 'updatedAt', 'phone'])
+            && request.resource.data.balance == 0
+            && request.resource.data.updatedAt == request.time
+            && request.resource.data.get('phone', '') is string && request.resource.data.get('phone', '').size() <= 20)
+        || (isAdmin() && walletAdminOk(uid, 0));
+      allow update: if (isOwner(uid) && !isBannedUser(uid) && walletSelfSpend(uid))
+        || (isAdmin() && walletAdminOk(uid, resource.data.balance));
+      allow delete: if false;
+    }
+
+    match /customerTx/{txId} {
+      allow read: if isAdmin() || (isSignedIn() && resource.data.uid == request.auth.uid);
+      allow create: if (isSignedIn()
+            && request.resource.data.keys().hasOnly(['uid', 'type', 'amount', 'note', 'ref', 'createdAt'])
+            && request.resource.data.uid == request.auth.uid
+            && request.resource.data.type == 'order'
+            && request.resource.data.amount is number && request.resource.data.amount < 0
+            && request.resource.data.ref is string && txId == 'ord_' + request.resource.data.ref
+            && request.resource.data.get('note', '') is string && request.resource.data.get('note', '').size() <= 300
+            && request.resource.data.createdAt == request.time
+            && getAfter(/databases/$(database)/documents/customerWallets/$(request.auth.uid)).data.lastTx == txId)
+        || (isAdmin()
+            && request.resource.data.keys().hasOnly(['uid', 'type', 'amount', 'note', 'ref', 'createdAt', 'createdBy'])
+            && request.resource.data.keys().hasAll(['uid', 'type', 'amount', 'createdAt', 'createdBy'])
+            && request.resource.data.type in ['topup', 'points', 'refund', 'adjust']
+            && request.resource.data.amount is number
+            && request.resource.data.get('note', '') is string && request.resource.data.get('note', '').size() <= 300
+            && request.resource.data.createdAt == request.time
+            && request.resource.data.createdBy == request.auth.uid);
+      allow update, delete: if false;
+    }
+
+    // طلبات شحن المحفظة (الزبون كيرسل وصل التحويل، المشرف كيراجع ويشحن)
+    match /customerTopups/{topupId} {
+      allow read: if isAdmin() || (isSignedIn() && resource.data.uid == request.auth.uid);
+      allow create: if isSignedIn() && !isBannedUser(request.auth.uid)
+        && request.resource.data.keys().hasOnly(['uid', 'phone', 'amount', 'method', 'status', 'createdAt'])
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.phone is string && request.resource.data.phone.size() <= 20
+        && request.resource.data.amount is number
+        && request.resource.data.amount >= walletSettings().topupMin && request.resource.data.amount <= walletSettings().topupMax
+        && walletSettings().enabled == true
+        && request.resource.data.method in ['card', 'cih', 'fellah', 'cashplus', 'wafacash', 'tijari', 'baridbank']
+        && request.resource.data.status == 'pending'
+        && request.resource.data.createdAt == request.time;
+      allow update: if isAdmin()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'adminNote', 'reviewedAt', 'reviewedBy'])
+        && request.resource.data.status in ['pending', 'approved', 'rejected']
+        && request.resource.data.get('adminNote', '') is string && request.resource.data.get('adminNote', '').size() <= 300
+        && request.resource.data.reviewedBy == request.auth.uid;
+      allow delete: if isAdmin();
+    }
+    match /customerTopupImages/{topupId} {
+      allow get: if isAdmin() || (isSignedIn() && resource.data.uid == request.auth.uid);
+      allow list: if isAdmin();
+      allow create: if isSignedIn() && !isBannedUser(request.auth.uid)
+        && request.resource.data.keys().hasOnly(['uid', 'image', 'createdAt'])
+        && request.resource.data.uid == request.auth.uid
+        && validReceiptImage(request.resource.data.image)
+        && request.resource.data.createdAt == request.time;
+      allow delete: if isAdmin();
+    }
+
+    // تحويل النقاط إلى رصيد: النقاط كتتخصم فورا (pointsLog/conv_<id>) والطلب كيبقى pending حتى يراجعو المشرف
+    // (النقاط ماشي مصدر موثوق على السيرفر، فالمشرف كيتأكد من الرصيد الحقيقي قبل ما يشحن المحفظة). الرفض كيرجّع النقاط.
+    match /pointsConversions/{convId} {
+      allow read: if isAdmin() || (isSignedIn() && resource.data.uid == request.auth.uid);
+      allow create: if isSignedIn() && !isBannedUser(request.auth.uid)
+        && request.resource.data.keys().hasOnly(['uid', 'phone', 'points', 'amount', 'status', 'createdAt'])
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.phone is string && request.resource.data.phone.size() <= 20
+        && request.resource.data.points is number && request.resource.data.points == int(request.resource.data.points)
+        && request.resource.data.points >= walletSettings().minPoints && request.resource.data.points <= walletSettings().maxPoints
+        && walletSettings().enabled == true && walletSettings().get('convertEnabled', true) == true
+        && near(request.resource.data.amount, request.resource.data.points / walletSettings().pointsPerDirham)
+        && request.resource.data.status == 'pending'
+        && request.resource.data.createdAt == request.time
+        && getAfter(/databases/$(database)/documents/pointsLog/$('conv_' + convId)).data.uid == request.auth.uid
+        && getAfter(/databases/$(database)/documents/pointsLog/$('conv_' + convId)).data.points == -request.resource.data.points;
+      allow update: if isAdmin()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'adminNote', 'reviewedAt', 'reviewedBy'])
+        && request.resource.data.status in ['approved', 'rejected']
+        && resource.data.status == 'pending'
+        && request.resource.data.get('adminNote', '') is string && request.resource.data.get('adminNote', '').size() <= 300
+        && request.resource.data.reviewedBy == request.auth.uid;
+      allow delete: if false;
     }
 
     // ───────────── تقييم السائق (driverReviews) ─────────────
