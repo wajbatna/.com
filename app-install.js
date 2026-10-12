@@ -16,7 +16,7 @@
   }
 
   var standalone = (window.matchMedia && matchMedia("(display-mode: standalone)").matches) || navigator.standalone === true;
-  if (standalone) return;
+  if (standalone) { window.wajbaInstall = { standalone: true, run: function () { return Promise.resolve(""); } }; return; }
 
   var isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent) && !window.MSStream;
   var deferred = null;
@@ -56,12 +56,23 @@
     document.body.appendChild(bar);
     bar.querySelector(".pwa-x").onclick = dismiss;
     var go = bar.querySelector(".pwa-go");
-    if (go) go.onclick = function () {
-      if (!deferred) return;
-      deferred.prompt();
-      deferred.userChoice.then(function () { deferred = null; removeBar(); });
-    };
+    if (go) go.onclick = function () { run(); };
   }
+
+  var HINT_IOS = "للتثبيت: اضغط على زر المشاركة ⬆️ ثم «إضافة إلى الشاشة الرئيسية»";
+  var HINT_OTHER = "للتثبيت: افتح قائمة المتصفح ⋮ ثم اختر «تثبيت التطبيق» أو «إضافة إلى الشاشة الرئيسية»";
+  // كيشغّل نافذة التثبيت الرسمية إلا كانت متاحة (كيرجع ""), وإلا كيرجع نص تعليمات التثبيت اليدوي
+  function run() {
+    if (deferred) {
+      var ev = deferred;
+      try {
+        ev.prompt();
+        return ev.userChoice.then(function () { deferred = null; removeBar(); return ""; }, function () { return ""; });
+      } catch (e) { deferred = null; }
+    }
+    return Promise.resolve(isIOS ? HINT_IOS : HINT_OTHER);
+  }
+  window.wajbaInstall = { standalone: false, run: run };
 
   // أندرويد / كروم / إيدج (حتى الكمبيوتر): الحدث الرسمي ديال التثبيت
   window.addEventListener("beforeinstallprompt", function (e) {

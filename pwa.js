@@ -19,9 +19,11 @@
   }
   var T = {
     ar: { title: "تجربة أحسن على هاتفك", sub: "حمّل تطبيق وجبتنا للوصول السريع", btn: "تحميل", btnFull: "تحميل التطبيق", close: "إغلاق",
-          ios: "للتحميل: اضغط على زر المشاركة ⬆️ ثم «إضافة إلى الشاشة الرئيسية»" },
+          ios: "للتحميل: اضغط على زر المشاركة ⬆️ ثم «إضافة إلى الشاشة الرئيسية»",
+          manual: "للتحميل: افتح قائمة المتصفح ⋮ ثم اختر «تثبيت التطبيق» أو «إضافة إلى الشاشة الرئيسية»" },
     fr: { title: "Meilleure expérience sur votre téléphone", sub: "Installez l'app Wajbatna pour un accès rapide", btn: "Installer", btnFull: "Installer l'application", close: "Fermer",
-          ios: "Pour installer : touchez Partager ⬆️ puis « Sur l'écran d'accueil »" }
+          ios: "Pour installer : touchez Partager ⬆️ puis « Sur l'écran d'accueil »",
+          manual: "Pour installer : ouvrez le menu du navigateur ⋮ puis « Installer l'application » ou « Ajouter à l'écran d'accueil »" }
   };
 
   var standalone = (window.matchMedia && matchMedia("(display-mode: standalone)").matches) || navigator.standalone === true;
@@ -81,12 +83,14 @@
     if (go) go.onclick = doInstall;
   }
 
-  // زر "تحميل التطبيق" داخل أي عنصر .pwa-slot (كيتزاد فـ نوافذ تسجيل الدخول وإنشاء الحساب)
+  var installed = false;
+  // زر "تحميل التطبيق" داخل أي عنصر .pwa-slot (نوافذ تسجيل الدخول وإنشاء الحساب): كيبقى ظاهر دائماً،
+  // وملي ما كيكونش التثبيت المباشر متاح (آيفون / متصفح ما فيهش النافذة الرسمية) كيبين تعليمات التثبيت اليدوي
   function fillSlots() {
     var slots = document.querySelectorAll(".pwa-slot");
     for (var i = 0; i < slots.length; i++) {
       var slot = slots[i];
-      if (!canInstall()) { slot.innerHTML = ""; continue; }
+      if (installed) { slot.innerHTML = ""; continue; }
       if (slot.firstChild) continue;
       var t = T[lang()];
       var b = document.createElement("button");
@@ -96,11 +100,16 @@
       var hint = document.createElement("div");
       hint.className = "pwa-hint";
       hint.style.display = "none";
-      hint.textContent = t.ios;
       b.onclick = (function (h) {
         return function () {
-          if (deferred) doInstall();
-          else h.style.display = "block";
+          var tt = T[lang()];
+          if (deferred) {
+            var ev = deferred;
+            try { ev.prompt(); ev.userChoice.then(function () { deferred = null; removeBar(); fillSlots(); }); return; }
+            catch (e) { deferred = null; }
+          }
+          h.textContent = isIOS ? tt.ios : tt.manual;
+          h.style.display = "block";
         };
       })(hint);
       slot.appendChild(b);
@@ -122,7 +131,7 @@
     fillSlots();
     setTimeout(showBar, 2500);
   });
-  window.addEventListener("appinstalled", function () { deferred = null; removeBar(); fillSlots(); });
+  window.addEventListener("appinstalled", function () { installed = true; deferred = null; removeBar(); fillSlots(); });
 
   // iOS Safari ما فيهش beforeinstallprompt: كنعرضو تعليمات يدوية
   if (isIOS && isMobile) { fillSlots(); setTimeout(showBar, 3500); }

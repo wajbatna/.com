@@ -305,6 +305,23 @@ function renderGate(app, icon, title, text) {
   $("gOut").onclick = () => signOut(auth);
 }
 
+// زر "تحميل التطبيق" دائم فصفحتي الدخول وإنشاء الحساب (كيختفي غير ملي يكون التطبيق مثبت وشاغل)
+function installBlockHtml() {
+  if (window.matchMedia?.("(display-mode: standalone)").matches || navigator.standalone === true) return "";
+  return `<div class="inst"><button class="btn ghost inst-btn" id="aInstall" type="button">${ic("download")} تحميل التطبيق على الهاتف</button>
+    <div class="inst-hint hide" id="aInstallHint"></div></div>`;
+}
+function bindInstall() {
+  const b = $("aInstall");
+  if (!b) return;
+  b.onclick = async () => {
+    const h = window.wajbaInstall;
+    const hint = h ? await h.run() : "للتثبيت: افتح قائمة المتصفح ثم اختر «إضافة إلى الشاشة الرئيسية»";
+    const el = $("aInstallHint");
+    if (el) { el.textContent = hint || ""; el.classList.toggle("hide", !hint); }
+  };
+}
+
 function renderAuth(app) {
   const reg = S.authTab === "register";
   const hasAccount = !!S.user; // مسجل دخول لكن بلا بروفايل سائق
@@ -324,7 +341,9 @@ function renderAuth(app) {
       <button class="btn" id="aGo" type="button">${hasAccount ? "إرسال طلب التسجيل" : reg ? "إنشاء حساب سائق" : "دخول"}</button>
       ${!reg && !hasAccount ? `<p class="center" style="margin:12px 0 0"><button class="btn sm ghost" id="aForgot" type="button">نسيت كلمة السر؟</button></p>` : ""}
       ${hasAccount ? `<p class="center" style="margin:12px 0 0"><button class="btn sm ghost" id="aOut" type="button">تسجيل الخروج</button></p>` : ""}
+      ${installBlockHtml()}
     </div></div>`;
+  bindInstall();
   app.querySelectorAll("[data-t]").forEach((b) => (b.onclick = () => { S.authTab = b.dataset.t; render(); }));
   const showErr = (m) => ($("aErr").innerHTML = `<div class="err">${esc(m)}</div>`);
   $("aGo").onclick = async () => {
@@ -371,7 +390,7 @@ function homeHtml(jobs) {
   return `
   <div class="card"><div class="sw"><div><b style="font-size:16px">${online ? "أنت متصل" : "أنت غير متصل"}</b>
     <div style="color:var(--mut);font-size:12px;margin-top:3px">${online ? "الإدارة كتشوف موقعك وتقدر تعيّن ليك طلبات" : "شعّل الاتصال باش تبان للإدارة وتوصلك التنبيهات"}</div></div>
-    <button class="toggle ${online ? "on" : ""}" id="tgOnline" type="button" aria-label="اتصال"></button></div></div>
+    <div class="switch"><input class="switch-check" id="tgOnline" type="checkbox" role="switch" aria-label="${online ? "متصل" : "غير متصل"}" ${online ? "checked" : ""}><label class="switch-label" for="tgOnline"><span></span></label></div></div></div>
   <div class="stats"><div class="stat"><b>${st.todayN}</b><span>توصيلات اليوم</span></div>
     <div class="stat"><b>${money(st.todayEarn)}</b><span>أرباح اليوم</span></div>
     <div class="stat"><b>${money(st.todayCash)}</b><span>كاش محصّل اليوم</span></div></div>
@@ -563,7 +582,10 @@ function renderShell(app) {
   const jqEl = $("jobQ");
   if (jqEl) jqEl.oninput = () => { S.jobQ = jqEl.value; render(); const n = $("jobQ"); if (n) { n.focus(); try { n.setSelectionRange(n.value.length, n.value.length); } catch (e) {} } };
   app.querySelectorAll("[data-seg]").forEach((b) => (b.onclick = () => { S.jobsSeg = b.dataset.seg; render(); }));
-  if ($("tgOnline")) $("tgOnline").onclick = toggleOnline;
+  if ($("tgOnline")) $("tgOnline").onclick = () => {
+    // المفتاح كيتحرك فوراً؛ وملي تكمل العملية (نجحت أو فشلات) كنرجعوه لحالة السائق الحقيقية
+    toggleOnline().finally(() => { const el = $("tgOnline"); if (el) el.checked = !!S.me?.online; });
+  };
   if ($("hWallet")) $("hWallet").onclick = () => { S.tab = "wallet"; render(); };
   if (S.tab === "me") bindProfile();
   if (S.tab === "wallet" && $("wTopup")) $("wTopup").onclick = openTopup;
