@@ -47,8 +47,25 @@ const PLANS_META = [
   { id: "weekly", days: 5, discount: 0.1 },
   { id: "monthly", days: 20, discount: 0.2 },
 ];
-const CAT_IDS = ["all", "breakfast", "lunch", "dinner"];
-const CAT_EMOJI = { all: "🍽", breakfast: ico("petit-dej"), lunch: ico("dejeuner"), dinner: ico("diner") };
+const CAT_IDS = ["all", "breakfast", "lunch", "dinner", "fav"];
+const CAT_EMOJI = { all: "🍽", breakfast: ico("petit-dej"), lunch: ico("dejeuner"), dinner: ico("diner"), fav: "❤️" };
+
+/* ---------- المفضلة: الزبون كيختار وجبات ويحطها فالمفضلة (محفوظة فمتصفحو، تخدم حتى بلا حساب) ---------- */
+const FAV_KEY = "wajbati_favs";
+function loadFavs() {
+  try {
+    const a = JSON.parse(localStorage.getItem(FAV_KEY) || "[]");
+    return new Set(Array.isArray(a) ? a.filter((x) => typeof x === "string") : []);
+  } catch (_) {
+    return new Set();
+  }
+}
+let favs = loadFavs();
+function saveFavs() {
+  try {
+    localStorage.setItem(FAV_KEY, JSON.stringify([...favs]));
+  } catch (_) {}
+}
 // طرق الأداء المتاحة للزبون فصفحة إتمام الطلب — الأدمين كيقدر يفعّل/يعطّل كل وحدة ويحط ليها RIB من لوحة التحكم (config/paymentMethods)
 const PAYMENT_METHODS = [
   { id: "card", icon: "💳", img: "img/icons/paiement.webp" },
@@ -204,7 +221,21 @@ function formatDate(d) {
   return date.toLocaleDateString(locale, { day: "numeric", month: "long", year: "numeric" });
 }
 function filtered() {
+  if (category === "fav") return meals.filter((m) => favs.has(m.id));
   return category === "all" ? meals : meals.filter((m) => m.category === category);
+}
+function toggleFav(id) {
+  const s = t(lang);
+  const m = meals.find((x) => x.id === id);
+  if (favs.has(id)) {
+    favs.delete(id);
+    toast(s.toastFavRemoved(m ? m.name : ""));
+  } else {
+    favs.add(id);
+    toast(s.toastFavAdded(m ? m.name : ""));
+  }
+  saveFavs();
+  renderMeals();
 }
 // الباقات الأسبوعية كتدوز من نفس مراحل الطلب العادي: كتزاد للسلة كعنصر (id = "pack:kids" / "pack:adults")
 // weeklyPackages[packId].price هو ثمن اليوم الواحد مباشرة (كيحدده الأدمين)، وكيتضرب فعدد أيام الخطة المختارة (يومي/أسبوعي/شهري)
@@ -742,6 +773,7 @@ function renderMeals() {
        : ""
    }
    <span class="category">${s.categories[m.category] || ""}</span>
+   <button type="button" class="fav-btn${favs.has(m.id) ? " on" : ""}" aria-pressed="${favs.has(m.id)}" aria-label="${escapeAttr((favs.has(m.id) ? s.favRemoveAria : s.favAddAria) + " — " + m.name)}" onclick="toggleFav('${m.id}')"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M12 21s-7.5-4.6-9.6-9.2C.9 8.3 2.7 4.5 6.3 4.5c2 0 3.4 1 4.4 2.5.3.4.9.4 1.2 0 1-1.5 2.4-2.5 4.4-2.5 3.6 0 5.4 3.8 3.9 7.3C19.5 16.4 12 21 12 21z"/></svg></button>
   </div>
   <div class="meal-body">
    <h3>${escapeHtml(m.name)}</h3>
@@ -758,7 +790,7 @@ function renderMeals() {
  </article>`
         )
         .join("")
-    : `<div class="empty">${s.emptyCategory}</div>`;
+    : `<div class="empty">${category === "fav" ? s.emptyFav : s.emptyCategory}</div>`;
 }
 
 function renderCart() {
@@ -3438,6 +3470,7 @@ function renewSubscription() {
 Object.assign(window, { filterMyOrders,
   orderWeeklyPack,
   setCategory,
+  toggleFav,
   add,
   remove,
   removeAll,

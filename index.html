@@ -226,6 +226,10 @@
     .meal-img.no-img::before{content:"";position:absolute;inset:0;background:url("img/icons/dejeuner.webp") center/56px no-repeat;opacity:.35}
     @media(hover:hover){.meal:hover img{transform:scale(1.06)}}
     .category{position:absolute;top:12px;inset-inline-start:12px;background:rgba(255,255,255,.95);backdrop-filter:blur(4px);padding:5px 12px;border-radius:999px;font-size:12px;font-weight:800;color:var(--primary);box-shadow:0 2px 8px #0002}
+    .fav-btn{position:absolute;top:10px;inset-inline-end:10px;z-index:2;width:40px;height:40px;border:0;border-radius:50%;background:rgba(255,255,255,.95);backdrop-filter:blur(4px);display:flex;align-items:center;justify-content:center;box-shadow:0 2px 8px #0002;cursor:pointer;transition:transform .15s ease}
+    .fav-btn svg{fill:none;stroke:#78716c;stroke-width:2;stroke-linejoin:round;transition:fill .2s ease,stroke .2s ease}
+    .fav-btn:active{transform:scale(.88)}
+    .fav-btn.on svg{fill:#e11d48;stroke:#e11d48}
     .meal-body{padding:18px;display:flex;flex-direction:column;flex:1}
     .meal h3{margin:0 0 6px;font-size:18.5px;font-weight:800;color:var(--text);line-height:1.35;overflow-wrap:anywhere}
     .desc{color:var(--muted);font-size:14px;line-height:1.6;min-height:42px;flex:1;overflow-wrap:anywhere}
