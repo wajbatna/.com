@@ -4,6 +4,13 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="theme-color" content="#064E3B">
+  <link rel="manifest" href="admin.webmanifest">
+  <link rel="apple-touch-icon" href="img/pwa/apple-touch-icon.png">
+  <link rel="icon" type="image/png" href="img/pwa/icon-192.png">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="وجبتنا مشرف">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <title>لوحة التحكم — وجبتنا</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -213,5 +220,6 @@
 <div class="toasts" id="toasts" role="status" aria-live="polite" aria-atomic="false"></div>
 
 <script type="module" src="admin.js"></script>
+<script src="app-install.js" defer data-key="admin" data-name="لوحة إدارة وجبتنا" data-icon="img/pwa/icon-192.png" data-sw="admin-sw.js" data-scope="./admin.html"></script>
 </body>
 </html>
