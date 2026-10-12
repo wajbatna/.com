@@ -305,7 +305,8 @@ service cloud.firestore {
       return ['name', 'address', 'phone', 'gender', 'avatar', 'referralCode', 'referredByUid',
               'referralBonusGiven', 'orderCount', 'ordersThisMonth', 'lastOrderMonthKey',
               'orderMilestone3Given', 'createdAt',
-              'email', 'privacyPolicyAccepted', 'privacyPolicyVersion', 'privacyPolicyAcceptedAt', 'lastLoginAt'];
+              'email', 'privacyPolicyAccepted', 'privacyPolicyVersion', 'privacyPolicyAcceptedAt', 'lastLoginAt',
+              'favorites'];
       // ملاحظة: 'status' (active/banned) ماشي هنا عمداً — كيتبدل غير من الـ Worker (Admin SDK) بعد التحقق من الأدمين.
     }
 
@@ -329,7 +330,8 @@ service cloud.firestore {
         && d.get('privacyPolicyAccepted', false) is bool
         && d.get('privacyPolicyVersion', '') is string && d.get('privacyPolicyVersion', '').size() <= 20
         && d.get('privacyPolicyAcceptedAt', request.time) is timestamp
-        && d.get('lastLoginAt', request.time) is timestamp;
+        && d.get('lastLoginAt', request.time) is timestamp
+        && d.get('favorites', []) is list && d.get('favorites', []).size() <= 200;
     }
 
     // سياسة الخصوصية: النسخة لي كيجب الزبون يوافق عليها = المنشورة فـ config/privacyPolicy، وإلا النسخة الافتراضية

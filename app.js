@@ -66,6 +66,21 @@ function saveFavs() {
     localStorage.setItem(FAV_KEY, JSON.stringify([...favs]));
   } catch (_) {}
 }
+// الزبون المسجل: المفضلة كتتحفظ فحسابو (users/{uid}.favorites) باش تبان فكل أجهزتو
+function pushFavs() {
+  if (!currentUser) return;
+  updateDoc(doc(db, "users", currentUser.uid), { favorites: [...favs].slice(0, 200) }).catch(() => {});
+}
+// عند الدخول: كندمجو مفضلة الحساب مع لي اختارها الزبون قبل ما يسجل، وكنحدثو الحساب إلا تبدل شي حاجة
+function syncFavsFromProfile() {
+  const remote = Array.isArray(userProfile?.favorites) ? userProfile.favorites.filter((x) => typeof x === "string") : [];
+  const merged = new Set([...remote, ...favs]);
+  const changed = merged.size !== new Set(remote).size;
+  favs = merged;
+  saveFavs();
+  if (meals.length) renderMeals();
+  if (changed) pushFavs();
+}
 // طرق الأداء المتاحة للزبون فصفحة إتمام الطلب — الأدمين كيقدر يفعّل/يعطّل كل وحدة ويحط ليها RIB من لوحة التحكم (config/paymentMethods)
 const PAYMENT_METHODS = [
   { id: "card", icon: "💳", img: "img/icons/paiement.webp" },
@@ -235,6 +250,7 @@ function toggleFav(id) {
     toast(s.toastFavAdded(m ? m.name : ""));
   }
   saveFavs();
+  pushFavs();
   renderMeals();
 }
 // الباقات الأسبوعية كتدوز من نفس مراحل الطلب العادي: كتزاد للسلة كعنصر (id = "pack:kids" / "pack:adults")
@@ -3721,6 +3737,7 @@ async function maybeGateInner() {
 }
 
 onAuthStateChanged(auth, async (user) => {
+  const hadUser = !!currentUser;
   currentUser = user;
   if (user) {
     // زبون داخل عبر Google/Apple ما عندوش وثيقة فـ users بعد (ماشي دخول بكلمة السر، فتلك الحالة submitSignup كيصاوبها هو)
@@ -3750,6 +3767,7 @@ onAuthStateChanged(auth, async (user) => {
           return;
         }
         touchLastLogin(user.uid);
+        syncFavsFromProfile();
       } else {
         userProfile = { phone: "", gender: "male", avatar: "👨" };
         profileIncomplete = isSocialProvider;
@@ -3777,6 +3795,12 @@ onAuthStateChanged(auth, async (user) => {
     userProfile = null;
     membershipData = null;
     profileIncomplete = false;
+    // خروج من الحساب: نمسحو المفضلة المحلية باش ما تدوزش لحساب آخر فنفس الجهاز (المفضلة محفوظة فالحساب)
+    if (hadUser) {
+      favs = new Set();
+      saveFavs();
+      if (meals.length) renderMeals();
+    }
     stopWatchingUnreadMessages();
     stopDriverRatings();
     walletUnwatch();
