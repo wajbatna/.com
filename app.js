@@ -475,6 +475,7 @@ function canShareFiles() {
   }
 }
 const RCP_DOWNLOAD_ICON = `<span class="rcp-ico" aria-hidden="true"><img src="img/icons/download.webp" alt="" width="28" height="28"></span>`;
+const RCP_VIEW_ICON = `<span class="rcp-ico" aria-hidden="true"><img src="img/icons/eye-open.webp" alt="" width="28" height="28"></span>`;
 const RCP_SHARE_ICON = `<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.6 10.5l6.8-4M8.6 13.5l6.8 4"/></svg>`;
 
 // قطعة HTML ديال معاينة الوصل (كتتعمر بـ showReceiptPreview) + أزرار التحميل/المشاركة
@@ -527,6 +528,56 @@ async function shareReceipt() {
     }
   } catch (e) {
     /* الزبون سد نافذة المشاركة — ما كاين خطأ */
+  }
+}
+// مشاهدة وصل طلب سابق فعارض بملء الشاشة (قابل للتمرير) مع زر تحميل
+let receiptViewerData = null; // { blob, url, code }
+function closeReceiptViewer() {
+  document.getElementById("receiptViewer")?.remove();
+  if (receiptViewerData) URL.revokeObjectURL(receiptViewerData.url);
+  receiptViewerData = null;
+  document.removeEventListener("keydown", receiptViewerKey);
+}
+function receiptViewerKey(e) {
+  if (e.key === "Escape") closeReceiptViewer();
+}
+function downloadViewedReceipt() {
+  if (!receiptViewerData) return;
+  saveBlob(receiptViewerData.blob, `wajbatna-receipt-${receiptViewerData.code}.jpg`);
+  toast(t(lang).receiptSaved);
+}
+async function viewOrderReceipt(id) {
+  const s = t(lang);
+  const o = myOrdersCache.find((x) => x.id === id);
+  const btn = document.getElementById("orderReceiptViewBtn");
+  if (!o) return;
+  if (btn) btn.disabled = true;
+  try {
+    const r = await makeReceipt(o, id);
+    closeReceiptViewer();
+    receiptViewerData = r;
+    const box = document.createElement("div");
+    box.id = "receiptViewer";
+    box.className = "rcp-viewer";
+    box.setAttribute("role", "dialog");
+    box.setAttribute("aria-modal", "true");
+    box.setAttribute("aria-label", `${s.receiptAlt} ${r.code}`);
+    box.innerHTML = `
+      <button type="button" class="image-lightbox-close" aria-label="${escapeAttr(s.receiptCloseAria)}" onclick="closeReceiptViewer()">✕</button>
+      <div class="rcp-viewer-scroll" onclick="closeReceiptViewer()">
+        <div class="receipt-stage rcp-viewer-stage" style="--pp:${r.printerPct}%" onclick="event.stopPropagation()">
+          <img class="receipt-img" src="${r.url}" alt="${escapeAttr(s.receiptAlt + " " + r.code)}">
+        </div>
+      </div>
+      <div class="rcp-viewer-bar">
+        <button type="button" class="rcp-btn rcp-btn--primary" onclick="downloadViewedReceipt()">${RCP_DOWNLOAD_ICON}<span>${s.receiptDownloadBtn}</span></button>
+      </div>`;
+    document.body.appendChild(box);
+    document.addEventListener("keydown", receiptViewerKey);
+  } catch (e) {
+    toast(s.receiptFailed, "error");
+  } finally {
+    if (btn) btn.disabled = false;
   }
 }
 // تحميل وصل طلب سابق من "طلباتي"
@@ -2112,7 +2163,10 @@ function openOrderDetail(id) {
       <div class="order-detail-row"><span>${s.orderTotalLabel}</span><b>${money(o.total)}</b></div>
     </div>
     <div class="order-detail-section">
-      <button type="button" class="rcp-btn rcp-btn--primary" id="orderReceiptBtn" onclick="downloadOrderReceipt('${o.id}')">${RCP_DOWNLOAD_ICON}<span>${s.receiptDownloadBtn}</span></button>
+      <div class="rcp-row">
+        <button type="button" class="rcp-btn rcp-btn--primary" id="orderReceiptBtn" onclick="downloadOrderReceipt('${o.id}')">${RCP_DOWNLOAD_ICON}<span>${s.receiptDownloadShort}</span></button>
+        <button type="button" class="rcp-btn rcp-btn--ghost" id="orderReceiptViewBtn" onclick="viewOrderReceipt('${o.id}')">${RCP_VIEW_ICON}<span>${s.receiptViewBtn}</span></button>
+      </div>
     </div>
     ${
       o.customer?.notes
@@ -3676,6 +3730,9 @@ Object.assign(window, { filterMyOrders,
   downloadReceipt,
   shareReceipt,
   downloadOrderReceipt,
+  viewOrderReceipt,
+  closeReceiptViewer,
+  downloadViewedReceipt,
   add,
   remove,
   removeAll,
