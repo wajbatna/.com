@@ -5,6 +5,7 @@ import { createLiveRoute, fmtDist, fmtDur } from "./routing.js";
 import { runPhoneGate } from "./phone-verify.js";
 import { initWallet, openWallet, closeWallet, walletWatch, walletUnwatch, walletOn, placeWalletOrder, WS as WALLET } from "./wallet.js";
 import { RECEIPT_METHODS, compressReceiptImage } from "./receipts.js";
+import { drawReceiptCanvas, canvasToBlob } from "./receipt-image.js";
 import { db, auth } from "./firebase.js";
 import { getLang, setLang, t } from "./i18n.js";
 import {
@@ -366,6 +367,186 @@ function orderCode(id) {
   return "WJ-" + String(id || "").slice(0, 8).toUpperCase();
 }
 // نسخ رقم الطلب لحافظة الجهاز (يخدم فـ Android وiPhone والكمبيوتر) مع تنبيه تأكيدي
+/* ═══════ وصل الطلب: صورة بشكل ورقة خارجة من طابعة (عرض بعد إتمام الطلب + تحميل/مشاركة) ═══════ */
+const PAY_ON_DELIVERY = ["cod", "tpe"];
+// [عدد المراحل المنجزة، فهرس المرحلة الحالية] لكل حالة طلب
+const RECEIPT_PROGRESS = { pending: [1, 1], accepted: [2, 2], preparing: [2, 2], outForDelivery: [3, 3], delivered: [4, -1], cancelled: [1, -1] };
+let currentReceipt = null; // { blob, url, code, printerPct } للوصل المعروض فنافذة تأكيد الطلب
+
+function toJsDate(v) {
+  if (v && typeof v.toDate === "function") return v.toDate();
+  if (v && typeof v.seconds === "number") return new Date(v.seconds * 1000);
+  const d = v ? new Date(v) : null;
+  return d && !isNaN(d) ? d : new Date(); // serverTimestamp لسا ما تحسبش = الوقت الحالي
+}
+function receiptShortDate(str) {
+  const d = new Date(str + "T00:00:00");
+  return isNaN(d) ? String(str) : d.toLocaleDateString(lang === "fr" ? "fr-FR" : "ar-MA", { day: "numeric", month: "short" });
+}
+// كيحول طلب (كيما كيتخزن فـ Firestore) لبيانات جاهزة لرسم الوصل
+function buildReceiptData(o, id) {
+  const s = t(lang);
+  const locale = lang === "fr" ? "fr-FR" : "ar-MA";
+  const created = toJsDate(o.createdAt);
+  const baseKey = orderStatusKey(o.status).startsWith("cancelled") ? "cancelled" : orderStatusKey(o.status);
+  const [doneCount, currentIndex] = RECEIPT_PROGRESS[baseKey] || RECEIPT_PROGRESS.pending;
+
+  const dates = o.schedule?.dates?.length ? o.schedule.dates : [o.schedule?.dateFrom, o.schedule?.dateTo].filter(Boolean);
+  const scheduleText = !dates.length
+    ? s.notSpecified
+    : dates.length > 1
+    ? `${dates.length} ${s.days} · ${receiptShortDate(dates[0])} – ${receiptShortDate(dates[dates.length - 1])}`
+    : formatDate(dates[0] + "T00:00:00");
+  const locLabel = o.deliveryLocation === "work" ? s.deliveryWork : o.deliveryLocation === "home" ? s.deliveryHome : s.notSpecified;
+  const mealLabel = o.mealType === "lunch" ? s.mealTypeLunch : o.mealType === "dinner" ? s.mealTypeDinner : s.notSpecified;
+
+  const items = (o.items || []).map((it) => ({ name: String(it.name || ""), qty: it.qty || 0, amountText: money((it.price || 0) * (it.qty || 0)) }));
+  const daily = (o.items || []).reduce((sum, it) => sum + (it.price || 0) * (it.qty || 0), 0);
+  const info = [
+    [s.receiptCustomer, o.customer?.name || s.notSpecified],
+    [s.receiptPhone, o.customer?.phone || s.notSpecified],
+    [s.receiptDelivery, scheduleText],
+  ];
+  if (o.schedule?.deliveryTime) info.push([s.receiptTime, o.schedule.deliveryTime]);
+  info.push([s.receiptPlaceMeal, `${locLabel} · ${mealLabel}`]);
+  const meta = PLANS_META.find((p) => p.id === o.plan);
+  if (meta && s.plans[o.plan]) {
+    const hasPack = (o.items || []).some((it) => it.pack);
+    const disc = !hasPack && meta.discount ? ` · ${s.plans[o.plan][1]}` : ""; // مثال: "خصم 10%"
+    info.push([s.receiptPlan, `${s.plans[o.plan][0]} · ${o.durationDays || dates.length || 1} ${(o.durationDays || 1) === 1 ? s.day : s.days}${disc}`]);
+    info.push([s.dailyCost, money(daily)]);
+  }
+
+  let payStatusText = s.receiptPayPending;
+  let payTone = "wait";
+  if (o.paymentMethod === "wallet") {
+    payStatusText = s.receiptPaid;
+    payTone = "ok";
+  } else if (PAY_ON_DELIVERY.includes(o.paymentMethod)) {
+    payStatusText = s.receiptPayOnDelivery;
+  }
+  const code = orderCode(id);
+  return {
+    rtl: lang !== "fr",
+    title: s.receiptTitle,
+    orderNoLabel: s.receiptOrderNo,
+    code,
+    dateLabel: s.receiptDate,
+    dateText: `${created.toLocaleDateString(locale, { day: "numeric", month: "long", year: "numeric" })} · ${created.toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" })}`,
+    info,
+    itemsLabel: s.receiptItems,
+    items,
+    totalLabel: s.orderTotalLabel,
+    totalText: money(o.total || 0),
+    paymentLabel: s.orderPaymentLabel,
+    paymentText: o.paymentMethodLabel || s.paymentMethods[o.paymentMethod] || s.notSpecified,
+    payStatusLabel: s.receiptPayStatus,
+    payStatusText,
+    payTone,
+    statusLabel: s.receiptStatusLabel,
+    statusText: s.receiptStatus[baseKey] || s.receiptStatus.pending,
+    statusTone: baseKey === "cancelled" ? "bad" : null,
+    steps: s.receiptSteps,
+    doneCount,
+    currentIndex,
+    thanks: s.receiptThanks,
+  };
+}
+async function makeReceipt(o, id) {
+  const { canvas, printerPct } = await drawReceiptCanvas(buildReceiptData(o, id));
+  const blob = await canvasToBlob(canvas);
+  return { blob, url: URL.createObjectURL(blob), code: orderCode(id), printerPct };
+}
+function saveBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
+}
+function canShareFiles() {
+  try {
+    return !!(navigator.canShare && navigator.canShare({ files: [new File([""], "a.jpg", { type: "image/jpeg" })] }));
+  } catch (_) {
+    return false;
+  }
+}
+const RCP_DOWNLOAD_ICON = `<span class="rcp-ico" aria-hidden="true"><img src="img/icons/download.webp" alt="" width="28" height="28"></span>`;
+const RCP_SHARE_ICON = `<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.6 10.5l6.8-4M8.6 13.5l6.8 4"/></svg>`;
+
+// قطعة HTML ديال معاينة الوصل (كتتعمر بـ showReceiptPreview) + أزرار التحميل/المشاركة
+function receiptSectionHtml(s) {
+  return `<div class="receipt-wrap">
+    <div class="receipt-stage" id="receiptStage" style="--pp:14%"><div class="receipt-loading">${s.receiptPreparing}</div></div>
+    <div class="rcp-actions">
+      <button type="button" class="rcp-btn rcp-btn--primary" id="rcpDownloadBtn" onclick="downloadReceipt()" disabled>${RCP_DOWNLOAD_ICON}<span>${s.receiptDownloadBtn}</span></button>
+      ${canShareFiles() ? `<button type="button" class="rcp-btn rcp-btn--ghost" id="rcpShareBtn" onclick="shareReceipt()" disabled>${RCP_SHARE_ICON}<span>${s.receiptShareBtn}</span></button>` : ""}
+      <small class="rcp-hint">${s.receiptDownloadHint}</small>
+    </div>
+  </div>`;
+}
+async function showReceiptPreview(o, id) {
+  const s = t(lang);
+  try {
+    const r = await makeReceipt(o, id);
+    const stage = document.getElementById("receiptStage");
+    if (!stage) {
+      URL.revokeObjectURL(r.url); // النافذة تسدات قبل ما يوجد الوصل
+      return;
+    }
+    if (currentReceipt) URL.revokeObjectURL(currentReceipt.url);
+    currentReceipt = r;
+    stage.style.setProperty("--pp", r.printerPct + "%");
+    stage.innerHTML = `<img class="receipt-img" src="${r.url}" alt="${escapeAttr(s.receiptAlt + " " + r.code)}">`;
+    ["rcpDownloadBtn", "rcpShareBtn"].forEach((bid) => {
+      const b = document.getElementById(bid);
+      if (b) b.disabled = false;
+    });
+  } catch (e) {
+    const stage = document.getElementById("receiptStage");
+    if (stage) stage.innerHTML = "";
+    toast(s.receiptFailed, "error");
+  }
+}
+function downloadReceipt() {
+  if (!currentReceipt) return;
+  saveBlob(currentReceipt.blob, `wajbatna-receipt-${currentReceipt.code}.jpg`);
+  toast(t(lang).receiptSaved);
+}
+async function shareReceipt() {
+  if (!currentReceipt) return;
+  const file = new File([currentReceipt.blob], `wajbatna-receipt-${currentReceipt.code}.jpg`, { type: "image/jpeg" });
+  try {
+    if (canShareFiles() && navigator.canShare({ files: [file] })) {
+      await navigator.share({ files: [file], title: t(lang).receiptTitle });
+    } else {
+      downloadReceipt();
+    }
+  } catch (e) {
+    /* الزبون سد نافذة المشاركة — ما كاين خطأ */
+  }
+}
+// تحميل وصل طلب سابق من "طلباتي"
+async function downloadOrderReceipt(id) {
+  const s = t(lang);
+  const o = myOrdersCache.find((x) => x.id === id);
+  const btn = document.getElementById("orderReceiptBtn");
+  if (!o) return;
+  if (btn) btn.disabled = true;
+  try {
+    const r = await makeReceipt(o, id);
+    saveBlob(r.blob, `wajbatna-receipt-${r.code}.jpg`);
+    URL.revokeObjectURL(r.url);
+    toast(s.receiptSaved);
+  } catch (e) {
+    toast(s.receiptFailed, "error");
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
 function copyOrderNumber(btn) {
   const text = btn.dataset.copy || "";
   const s = t(lang);
@@ -1361,10 +1542,12 @@ async function submitOrder(e) {
        <button type="button" class="copy-link-btn" data-copy="${escapeAttr(orderCode(ref.id))}" onclick="copyOrderNumber(this)" style="border:0;background:#f0fdf4;color:#047857;border-radius:8px;padding:6px 14px;font-size:13px;font-weight:800;cursor:pointer;margin:2px 0 10px">${s.copyOrderNumber}</button>
        <p>${s.orderWillContact(escapeHtml(phone))}</p>
        ${RECEIPT_METHODS.includes(order.paymentMethod) ? `<div class="order-detail-section" id="receiptBlockSuccess" style="text-align:right;margin:10px 0"></div>` : ""}
+       ${receiptSectionHtml(s)}
        <button type="button" class="checkout" onclick="closeCheckout();scrollToMenu()">${s.newOrderBtn}</button>
      </div>`;
     box.scrollTop = 0;
     if (document.getElementById("receiptBlockSuccess")) renderReceiptBlock(ref.id, "receiptBlockSuccess");
+    showReceiptPreview({ ...order, createdAt: new Date() }, ref.id);
   } catch (err) {
     toast(s.orderError, "error");
     if (submitBtn) {
@@ -1927,6 +2110,9 @@ function openOrderDetail(id) {
     <div class="order-detail-section">
       <div class="order-detail-row"><span>${s.orderPaymentLabel}</span><span>${escapeHtml(o.paymentMethodLabel || s.notSpecified)}</span></div>
       <div class="order-detail-row"><span>${s.orderTotalLabel}</span><b>${money(o.total)}</b></div>
+    </div>
+    <div class="order-detail-section">
+      <button type="button" class="rcp-btn rcp-btn--primary" id="orderReceiptBtn" onclick="downloadOrderReceipt('${o.id}')">${RCP_DOWNLOAD_ICON}<span>${s.receiptDownloadBtn}</span></button>
     </div>
     ${
       o.customer?.notes
@@ -3487,6 +3673,9 @@ Object.assign(window, { filterMyOrders,
   orderWeeklyPack,
   setCategory,
   toggleFav,
+  downloadReceipt,
+  shareReceipt,
+  downloadOrderReceipt,
   add,
   remove,
   removeAll,

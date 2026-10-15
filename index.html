@@ -310,6 +310,24 @@
     .confirm-box h2{margin:0 0 10px;color:var(--primary);font-size:22px;font-weight:900}
     .confirm-box p{margin:6px 0;color:var(--muted);font-size:15px}
     .confirm-ref{display:inline-block;margin:8px 0;padding:6px 16px;border-radius:999px;background:#f0fdf4;border:1px solid #a7f3d0;color:var(--primary-light);font-weight:900;letter-spacing:1px;direction:ltr}
+    /* وصل الطلب: ورقة خارجة من طابعة + أزرار التحميل */
+    .receipt-wrap{margin:16px 0 8px}
+    .receipt-stage{position:relative;max-width:420px;margin:0 auto;border-radius:22px;overflow:hidden;background:#eef1f5;box-shadow:0 10px 30px #0f172a1f}
+    .receipt-loading{display:flex;align-items:center;justify-content:center;min-height:240px;color:var(--muted);font-weight:700;font-size:14px}
+    .receipt-img{display:block;width:100%;height:auto;animation:rcpPrint 2.6s steps(70,end) .2s both;-webkit-user-drag:none}
+    @keyframes rcpPrint{from{clip-path:inset(0 0 calc(100% - var(--pp,14%)) 0)}to{clip-path:inset(0 0 0 0)}}
+    @media(prefers-reduced-motion:reduce){.receipt-img{animation:none}}
+    .rcp-actions{display:grid;gap:10px;max-width:420px;margin:14px auto 0}
+    .rcp-btn{display:flex;align-items:center;justify-content:center;gap:12px;width:100%;min-height:56px;padding:0 20px;border:0;border-radius:18px;font-family:inherit;font-size:16px;font-weight:800;line-height:1;cursor:pointer;transition:transform .15s ease,box-shadow .2s ease,filter .2s ease}
+    .rcp-btn:active:not(:disabled){transform:scale(.98)}
+    .rcp-btn:disabled{opacity:.55;cursor:wait}
+    .rcp-btn--primary{background:linear-gradient(135deg,#064e3b 0%,#047857 100%);color:#fff;box-shadow:0 10px 24px #064e3b40,inset 0 1px 0 #ffffff26}
+    .rcp-btn--primary:hover:not(:disabled){filter:brightness(1.08);box-shadow:0 14px 30px #064e3b55}
+    .rcp-btn--ghost{background:#fff;color:var(--primary);border:1.5px solid #d1fae5;box-shadow:0 4px 14px #0000000d}
+    .rcp-btn--ghost:hover:not(:disabled){border-color:var(--primary-light)}
+    .rcp-ico{flex:none;width:38px;height:38px;border-radius:50%;background:#fff;display:grid;place-items:center;box-shadow:0 2px 8px #00000026}
+    .rcp-ico img{width:30px;height:30px;object-fit:contain;margin:0!important;vertical-align:middle!important}
+    .rcp-hint{text-align:center;color:var(--muted);font-size:12.5px}
     .cod-note{background:#fffbeb;border:1px solid #fde68a;color:#92400e;border-radius:16px;padding:12px;font-size:14px;font-weight:700;margin:0 0 16px}
     .empty{text-align:center;grid-column:1/-1;padding:50px 20px;background:#fff;border:2px dashed var(--border);border-radius:24px;color:var(--muted);font-size:15px}
 
