@@ -73,7 +73,7 @@
     bar.setAttribute("role", "dialog");
     bar.dir = lang() === "fr" ? "ltr" : "rtl";
     bar.innerHTML =
-      '<img src="img/pwa/icon-192.png" alt="">' +
+      '<img src="' + (window.wajbaAppIcon || "img/pwa/icon-192.png") + '" alt="">' +
       '<div class="pwa-t"><b>' + t.title + "</b><small>" + (deferred ? t.sub : t.ios) + "</small></div>" +
       (deferred ? '<button class="pwa-go" type="button">' + t.btn + "</button>" : "") +
       '<button class="pwa-x" type="button" aria-label="' + t.close + '">×</button>';
@@ -96,7 +96,7 @@
       var b = document.createElement("button");
       b.type = "button";
       b.className = "pwa-inst";
-      b.innerHTML = '<img src="img/pwa/icon-192.png" alt="">' + t.btnFull;
+      b.innerHTML = '<img src="' + (window.wajbaAppIcon || "img/pwa/icon-192.png") + '" alt="">' + t.btnFull;
       var hint = document.createElement("div");
       hint.className = "pwa-hint";
       hint.style.display = "none";

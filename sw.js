@@ -1,5 +1,5 @@
 // sw.js — Service Worker بسيط: network-first مع احتياط من الكاش (ما كيخبّي حتى شي من Firebase/Firestore)
-const CACHE = "wajbatna-v2";
+const CACHE = "wajbatna-v3";
 const SHELL = ["./", "index.html", "app.js", "i18n.js", "firebase.js", "manifest.webmanifest", "pwa.js", "img/wordmark.webp", "img/logo.png", "img/pwa/icon-192.png"];
 
 self.addEventListener("install", (e) => {
