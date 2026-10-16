@@ -75,7 +75,8 @@ service cloud.firestore {
     // ───────────── config ─────────────
 
     function validConfig(docId, d) {
-      return (docId == 'appIcon' && d.keys().hasOnly(['active','updatedAt','updatedBy']) && d.active is string && d.active.size() <= 60)
+      return (docId == 'adBanner' && d.keys().hasOnly(['enabled','code','height','updatedAt','updatedBy']) && d.enabled is bool && d.code is string && d.code.size() <= 20000 && d.height is number && d.height >= 50 && d.height <= 1000)
+        || (docId == 'appIcon' && d.keys().hasOnly(['active','updatedAt','updatedBy']) && d.active is string && d.active.size() <= 60)
         || (docId == 'dailyMeal' && d.image is string && d.image.size() <= 500000
           && d.get('title', '') is string && d.get('title', '').size() <= 150
           && d.get('auto', true) is bool)
@@ -156,7 +157,7 @@ service cloud.firestore {
     // 6 وثائق فقط كيقراوها الزبناء (بلا تسجيل دخول): dailyMeal / paymentMethods / pointsRules / loyaltyProgram / weeklyPackagePrices / privacyPolicy.
     // أي وثيقة أخرى فـ config: الأدمين فقط. الكتابة: الأدمين فقط مع فحص القيم.
     match /config/{docId} {
-      allow get: if docId in ['dailyMeal', 'paymentMethods', 'pointsRules', 'loyaltyProgram', 'weeklyPackagePrices', 'privacyPolicy', 'whatsappVerify', 'walletSettings','appIcon'];
+      allow get: if docId in ['dailyMeal', 'paymentMethods', 'pointsRules', 'loyaltyProgram', 'weeklyPackagePrices', 'privacyPolicy', 'whatsappVerify', 'walletSettings','appIcon','adBanner'];
       allow get: if docId == 'driverSettings' && isActiveDriver();
       allow read: if isAdmin();
       allow create, update: if isAdmin() && validConfig(docId, request.resource.data);
