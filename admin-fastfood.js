@@ -49,6 +49,7 @@ function catForm() {
     '<input id="cNameFr" style="' + inp + '" dir="ltr" placeholder="Nom en français (اختياري)" maxlength="80" value="' + esc(f.nameFr) + '">' +
     '<input id="cOrder" type="number" min="0" style="' + inp + '" placeholder="الترتيب (0 يظهر أولاً)" value="' + esc(f.order) + '">' +
     '<div style="display:flex;align-items:center;gap:10px">' + thumb(f.image) + '<input id="cImg" type="file" accept="image/*"></div>' +
+    '<b>إضافات الفئة (اختياري، مثل: راسيون فريت)</b>' + (f.extras || []).map((s, k) => '<div style="display:flex;gap:6px;align-items:center"><input data-el="' + k + '" style="' + inp + ';flex:2" placeholder="الإضافة (راسيون فريت)" maxlength="40" value="' + esc(s.label) + '"><input data-ep="' + k + '" type="number" min="0" step="any" style="' + inp + ';flex:1" placeholder="+السعر" value="' + esc(s.price) + '"><button type="button" class="btn-danger-sm" data-ed="' + k + '">×</button></div>').join('') + ((f.extras || []).length < 4 ? '<div><button type="button" class="btn-outline-sm" id="eAdd">+ إضافة</button></div>' : '') +
     sw(f.enabled, 'id="cOn"') +
     '<div style="display:flex;gap:8px"><button class="add" id="cSave">حفظ</button><button class="btn-outline-sm" id="cCancel">إلغاء</button></div></div>';
 }
@@ -73,7 +74,7 @@ function paint() {
   root.innerHTML =
     '<div class="admin-card"><h3>فئات الفاست فود</h3><p style="opacity:.75;font-size:13px;line-height:1.6">كل فئة تظهر للزبون كصورة قابلة للضغط (بيتزا، برغر...). عند الضغط تُفتح أصنافها. الفئة الموقوفة أو التي بلا أصناف مفعّلة لا تظهر.</p>' +
     (cats.length ? cats.map((c) => '<div class="user-order" style="display:flex;align-items:center;gap:10px;margin-bottom:8px">' + thumb(c.image) + '<div style="flex:1;min-width:0"><b>' + esc(c.name) + '</b><div style="font-size:12px;opacity:.7">' + items.filter((i) => i.catId === c.id).length + " صنف</div></div>" + sw(c.enabled !== false, 'data-ctog="' + esc(c.id) + '"') + '<button class="btn-outline-sm" data-cedit="' + esc(c.id) + '">تعديل</button><button class="btn-danger-sm" data-cdel="' + esc(c.id) + '">حذف</button></div>').join("") : '<div class="empty">لا توجد فئات بعد</div>') +
-    (fc ? catForm() : '<button class="add" id="cNew" style="margin-top:8px">+ فئة جديدة</button>') + "</div>" +
+    (fc ? catForm() : '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px"><button class="add" id="cNew">+ فئة جديدة</button>' + (cats.some((c) => c.id === "tacos") ? "" : '<button class="btn-outline-sm" id="cSeed">إضافة الطاكوس والصندويش الجاهزين</button>') + "</div>") + "</div>" +
     '<div class="admin-card"><h3>أصناف الفاست فود</h3>' +
     '<select id="iFilter" style="' + inp + ';margin-bottom:10px"><option value="">كل الفئات</option>' + cats.map((c) => '<option value="' + esc(c.id) + '"' + (c.id === filter ? " selected" : "") + ">" + esc(c.name) + "</option>").join("") + "</select>" +
     (list.length ? list.map((i) => '<div class="user-order" style="display:flex;align-items:center;gap:10px;margin-bottom:8px">' + thumb(i.image) + '<div style="flex:1;min-width:0"><b>' + esc(i.name) + '</b><div style="font-size:12px;opacity:.7">' + esc((cats.find((c) => c.id === i.catId) || {}).name || "—") + " · " + (i.sizes || []).map((s) => esc(s.label) + " " + s.price).join(" / ") + "</div></div>" + sw(i.enabled !== false, 'data-itog="' + esc(i.id) + '"') + '<button class="btn-outline-sm" data-iedit="' + esc(i.id) + '">تعديل</button><button class="btn-danger-sm" data-idel="' + esc(i.id) + '">حذف</button></div>').join("") : '<div class="empty">لا توجد أصناف</div>') +
@@ -89,9 +90,9 @@ const q = (s) => root.querySelector(s);
 const qa = (s) => root.querySelectorAll(s);
 
 function bind() {
-  qa("[data-ctog]").forEach((c) => (c.onchange = () => { const x = cats.find((k) => k.id === c.dataset.ctog); guarded(() => setDoc(doc(db, "fastFoodCats", x.id), { name: x.name, nameFr: x.nameFr || "", image: x.image || "", order: x.order || 0, enabled: c.checked, ...stamp() }), c.checked ? "تم التفعيل" : "تم الإيقاف"); }));
+  qa("[data-ctog]").forEach((c) => (c.onchange = () => { const x = cats.find((k) => k.id === c.dataset.ctog); guarded(() => setDoc(doc(db, "fastFoodCats", x.id), { name: x.name, nameFr: x.nameFr || "", image: x.image || "", extras: x.extras || [], order: x.order || 0, enabled: c.checked, ...stamp() }), c.checked ? "تم التفعيل" : "تم الإيقاف"); }));
   qa("[data-itog]").forEach((c) => (c.onchange = () => { const x = items.find((k) => k.id === c.dataset.itog); guarded(() => setDoc(doc(db, "fastFoodItems", x.id), { catId: x.catId, name: x.name, nameFr: x.nameFr || "", description: x.description || "", descriptionFr: x.descriptionFr || "", image: x.image || "", sizes: x.sizes, order: x.order || 0, enabled: c.checked, ...stamp() }), c.checked ? "تم التفعيل" : "تم الإيقاف"); }));
-  qa("[data-cedit]").forEach((b) => (b.onclick = () => { fc = { ...cats.find((c) => c.id === b.dataset.cedit) }; paint(); }));
+  qa("[data-cedit]").forEach((b) => (b.onclick = () => { const c0 = cats.find((c) => c.id === b.dataset.cedit); fc = { ...c0, extras: (c0.extras || []).map((s) => ({ ...s })) }; paint(); }));
   qa("[data-iedit]").forEach((b) => (b.onclick = () => { const i = items.find((c) => c.id === b.dataset.iedit); fi = { ...i, sizes: (i.sizes || []).map((s) => ({ ...s })) }; paint(); }));
   qa("[data-cdel]").forEach((b) => (b.onclick = () => {
     const c = cats.find((k) => k.id === b.dataset.cdel), n = items.filter((i) => i.catId === c.id);
@@ -100,17 +101,33 @@ function bind() {
   }));
   qa("[data-idel]").forEach((b) => (b.onclick = () => { if (confirm("حذف هذا الصنف؟")) guarded(() => deleteDoc(doc(db, "fastFoodItems", b.dataset.idel)), "تم الحذف"); }));
   const fl = q("#iFilter"); if (fl) fl.onchange = () => { filter = fl.value; paint(); };
-  const cn = q("#cNew"); if (cn) cn.onclick = () => { fc = { name: "", nameFr: "", image: "", order: cats.length, enabled: true }; paint(); };
+  const sd = q("#cSeed");
+  if (sd) sd.onclick = () => {
+    if (!confirm("سيتم إنشاء فئة «طاكوس» (5 أصناف بصورها، موقوفة حتى تحدد الأسعار) وفئة «صندويش». متابعة؟")) return;
+    const T = [["tacos_1", "طاكوس مشكّل (لحم + دجاج + لحم بارد)", "Tacos mixte"], ["tacos_2", "طاكوس النقانق", "Tacos saucisses"], ["tacos_3", "طاكوس الدجاج", "Tacos poulet"], ["tacos_4", "طاكوس الدجاج المقرمش", "Tacos poulet croustillant"], ["tacos_5", "طاكوس الدجاج بالجبن والمخلل", "Tacos poulet fromage & cornichons"]];
+    guarded(async () => {
+      const w = writeBatch(db);
+      w.set(doc(db, "fastFoodCats", "tacos"), { name: "طاكوس", nameFr: "Tacos", image: "img/fastfood/tacos-1.jpg", extras: [{ label: "راسيون فريت", labelFr: "Portion de frites", price: 0 }], order: 0, enabled: true, ...stamp() });
+      w.set(doc(db, "fastFoodCats", "sandwich"), { name: "صندويش", nameFr: "Sandwich", image: "", extras: [], order: 1, enabled: true, ...stamp() });
+      T.forEach(([id, name, fr], k) => w.set(doc(db, "fastFoodItems", id), { catId: "tacos", name, nameFr: fr, description: "", descriptionFr: "", image: "img/fastfood/tacos-" + (k + 1) + ".jpg", sizes: [{ label: "عادي", labelFr: "Normal", price: 0 }], order: k, enabled: false, ...stamp() }));
+      await w.commit();
+    }, "تمت الإضافة. حدّد الأسعار ثم فعّل الأصناف");
+  };
+  const cn = q("#cNew"); if (cn) cn.onclick = () => { fc = { name: "", nameFr: "", image: "", extras: [], order: cats.length, enabled: true }; paint(); };
   const inw = q("#iNew"); if (inw) inw.onclick = () => { fi = { catId: filter || cats[0].id, name: "", nameFr: "", description: "", image: "", order: items.length, enabled: true, sizes: [{ label: "", price: "" }] }; paint(); };
   if (fc) {
     q("#cCancel").onclick = () => { fc = null; paint(); };
+    const ea = q("#eAdd"); if (ea) ea.onclick = () => { sync(); fc.extras.push({ label: "", price: "" }); paint(); };
+    qa("[data-ed]").forEach((b) => (b.onclick = () => { sync(); fc.extras.splice(Number(b.dataset.ed), 1); paint(); }));
     q("#cImg").onchange = async (e) => { try { fc.image = await cropImage(e.target.files[0], 480, 480); sync(); paint(); } catch (x) { ctx.toast("تعذّر قراءة الصورة", "error"); } };
     q("#cSave").onclick = () => {
       sync();
       if (!fc.name.trim()) return ctx.toast("اكتب اسم الفئة", "error");
       if (!fc.image) return ctx.toast("اختر صورة للفئة", "error");
+      const extras = (fc.extras || []).filter((s) => String(s.label).trim() || String(s.price).trim());
+      if (extras.some((s) => !String(s.label).trim() || String(s.price).trim() === "" || !(Number(s.price) >= 0))) return ctx.toast("أكمل الإضافات والأسعار", "error");
       const id = fc.id || newId();
-      guarded(() => setDoc(doc(db, "fastFoodCats", id), { name: fc.name.trim(), nameFr: (fc.nameFr || "").trim(), image: fc.image, order: Number(fc.order) || 0, enabled: !!fc.enabled, ...stamp() }).then(() => { fc = null; }), "تم الحفظ");
+      guarded(() => setDoc(doc(db, "fastFoodCats", id), { name: fc.name.trim(), nameFr: (fc.nameFr || "").trim(), image: fc.image, extras: extras.map((s) => ({ label: String(s.label).trim(), price: Number(s.price) })), order: Number(fc.order) || 0, enabled: !!fc.enabled, ...stamp() }).then(() => { fc = null; }), "تم الحفظ");
     };
   }
   if (fi) {
@@ -132,6 +149,7 @@ function bind() {
 function sync() {
   if (!fc || !q("#cName")) return;
   fc.name = q("#cName").value; fc.nameFr = q("#cNameFr").value; fc.order = q("#cOrder").value; fc.enabled = q("#cOn").checked;
+  fc.extras = (fc.extras || []).map((s, k) => ({ ...s, label: q('[data-el="' + k + '"]').value, price: q('[data-ep="' + k + '"]').value }));
 }
 function syncI() {
   if (!fi || !q("#iName")) return;

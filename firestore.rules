@@ -668,7 +668,7 @@ service cloud.firestore {
     // ───────────── الفاست فود (فئات + أصناف بأحجام وأسعار) ─────────────
     // القراءة عامة (الموقع يعرضها)، الكتابة للأدمين فقط مع فحص القيم. الإيقاف/التشغيل = حقل enabled.
     function validFfImage(v) {
-      return v is string && v.size() <= 400000 && (v == '' || v.matches('^data:image/(jpeg|png|webp);base64,.*'));
+      return v is string && v.size() <= 400000 && (v == '' || v.matches('^data:image/(jpeg|png|webp);base64,.*') || v.matches('^img/fastfood/[A-Za-z0-9_.-]+$'));
     }
     function validFfSize(s) {
       return s.keys().hasOnly(['label', 'labelFr', 'price'])
@@ -685,8 +685,16 @@ service cloud.firestore {
         && (l.size() < 5 || validFfSize(l[4]))
         && (l.size() < 6 || validFfSize(l[5]));
     }
+    function validFfExtras(l) {
+      return l is list && l.size() <= 4
+        && (l.size() < 1 || validFfSize(l[0]))
+        && (l.size() < 2 || validFfSize(l[1]))
+        && (l.size() < 3 || validFfSize(l[2]))
+        && (l.size() < 4 || validFfSize(l[3]));
+    }
     function validFfCat(d) {
-      return d.keys().hasOnly(['name', 'nameFr', 'image', 'order', 'enabled', 'updatedAt', 'updatedBy'])
+      return d.keys().hasOnly(['name', 'nameFr', 'image', 'extras', 'order', 'enabled', 'updatedAt', 'updatedBy'])
+        && validFfExtras(d.get('extras', []))
         && d.name is string && d.name.size() > 0 && d.name.size() <= 80
         && d.get('nameFr', '') is string && d.get('nameFr', '').size() <= 80
         && validFfImage(d.get('image', ''))
