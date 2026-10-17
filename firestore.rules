@@ -75,7 +75,7 @@ service cloud.firestore {
     // ───────────── config ─────────────
 
     function validConfig(docId, d) {
-      return (docId == 'adBanner' && d.keys().hasOnly(['enabled','code','width','height','updatedAt','updatedBy']) && d.enabled is bool && d.code is string && d.code.size() <= 20000 && d.height is number && d.height >= 50 && d.height <= 1000 && d.get('width', 300) is number && d.get('width', 300) >= 50 && d.get('width', 300) <= 1000)
+      return ((docId == 'adBanner' || docId == 'driverAdBanner') && d.keys().hasOnly(['enabled','code','width','height','updatedAt','updatedBy']) && d.enabled is bool && d.code is string && d.code.size() <= 20000 && d.height is number && d.height >= 50 && d.height <= 1000 && d.get('width', 300) is number && d.get('width', 300) >= 50 && d.get('width', 300) <= 1000)
         || (docId == 'appIcon' && d.keys().hasOnly(['active','updatedAt','updatedBy']) && d.active is string && d.active.size() <= 60)
         || (docId == 'dailyMeal' && d.image is string && d.image.size() <= 500000
           && d.get('title', '') is string && d.get('title', '').size() <= 150
@@ -158,7 +158,7 @@ service cloud.firestore {
     // أي وثيقة أخرى فـ config: الأدمين فقط. الكتابة: الأدمين فقط مع فحص القيم.
     match /config/{docId} {
       allow get: if docId in ['dailyMeal', 'paymentMethods', 'pointsRules', 'loyaltyProgram', 'weeklyPackagePrices', 'privacyPolicy', 'whatsappVerify', 'walletSettings','appIcon','adBanner'];
-      allow get: if docId == 'driverSettings' && isActiveDriver();
+      allow get: if (docId == 'driverSettings' || docId == 'driverAdBanner') && isActiveDriver();
       allow read: if isAdmin();
       allow create, update: if isAdmin() && validConfig(docId, request.resource.data);
       allow delete: if false;
