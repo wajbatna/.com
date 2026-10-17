@@ -1,5 +1,5 @@
 // ad-banner.js — بانر الإعلانات تحت الباقات. كيبان غير إيلا فعّلو المشرف (config/adBanner).
-// الكود كيتعرض داخل iframe معزول (sandbox بلا allow-same-origin) باش ما يقدرش يوصل لحساب الزبون ولا لبيانات الموقع.
+// الكود كيتعرض داخل iframe (srcdoc) باش document.write ديال شبكات الإعلانات ما يمسحش الصفحة. بلا sandbox باش localStorage/الكوكيز والتحقق من الدومين يخدمو.
 import { db } from "./firebase.js";
 import { doc, getDoc } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
 
@@ -18,7 +18,6 @@ import { doc, getDoc } from "https://www.gstatic.com/firebasejs/12.18.0/firebase
     box.id = "adBannerBox";
     box.style.cssText = "margin:0 0 22px;text-align:center";
     const f = document.createElement("iframe");
-    f.setAttribute("sandbox", "allow-scripts allow-popups allow-popups-to-escape-sandbox");
     f.setAttribute("loading", "lazy");
     f.title = "ad";
     f.style.cssText = "width:" + w + "px;max-width:100%;height:" + h + "px;border:0;border-radius:14px;background:transparent;overflow:hidden";

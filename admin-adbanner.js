@@ -33,7 +33,7 @@ export async function renderAdBannerTab(el) {
     SIZES.map(([w, h]) => '<label style="display:flex;align-items:center;gap:6px"><input type="radio" name="abSize" value="' + w + "x" + h + '"' + (w === (d.width || 300) && h === (d.height || 250) ? " checked" : "") + "> " + w + "x" + h + "</label>").join("") + "</div>" +
     '<p style="opacity:.7;font-size:12px">يجب أن يطابق الحجم المختار الحجم الذي أنشأت به الوحدة في Adsterra (يُضبط تلقائياً عند لصق الكود).</p>' +
     '<div class="users-filters" style="margin-top:10px"><button class="add" id="abSave">حفظ</button></div>' +
-    '<p style="opacity:.7;font-size:12px;line-height:1.6">للأمان يُعرض الإعلان داخل إطار معزول. بعض الشبكات الإعلانية قد لا تعمل داخل إطار معزول؛ جرّب وتأكد من الظهور في الصفحة الرئيسية.</p></div>';
+    '<p style="opacity:.7;font-size:12px;line-height:1.6">يُعرض الإعلان داخل إطار داخل الصفحة. ضع فقط أكواد من شبكات إعلانية تثق بها، لأن الكود يعمل بنفس صلاحيات الموقع. إن لم يظهر إعلان فتأكد أن الدومين مقبول في Adsterra.</p></div>';
   const pick = (w, h) => { const r = el.querySelector('input[name="abSize"][value="' + w + "x" + h + '"]'); if (r) r.checked = true; };
   const sync = () => {
     const c = el.querySelector("#abCode").value;
