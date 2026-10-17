@@ -283,6 +283,7 @@ function cartItems() {
   return Object.entries(cart)
     .map(([id, qty]) => {
       if (id.startsWith("pack:")) return packItem(id, qty);
+      if (id.startsWith("ff:")) return window.ffCartItem ? window.ffCartItem(id, qty) : null;
       const m = meals.find((x) => x.id === id);
       return m ? { ...m, qty } : null;
     })
@@ -965,14 +966,15 @@ function setCategory(c) {
 let lastTouchedId = null;
 function mealName(id) {
   if (id.startsWith("pack:")) return packItem(id, 1)?.name || "";
+  if (id.startsWith("ff:")) return window.ffCartItem?.(id, 1)?.name || "";
   return meals.find((x) => x.id === id)?.name || "";
 }
-function add(id) {
+function add(id, n = 1) {
   if (!id.startsWith("pack:") && cartHasPack()) {
     Object.keys(cart).forEach((k) => k.startsWith("pack:") && delete cart[k]);
   }
   const first = !cart[id];
-  cart[id] = (cart[id] || 0) + 1;
+  cart[id] = (cart[id] || 0) + n;
   lastTouchedId = id;
   render();
   setTimeout(() => (lastTouchedId = null), 600);
@@ -1106,6 +1108,7 @@ function render() {
   renderCategories();
   renderMeals();
   renderCart();
+  if (window.ffRender) window.ffRender();
 }
 
 /* ---------- إتمام الطلب ---------- */

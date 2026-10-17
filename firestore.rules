@@ -665,6 +665,59 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    // ───────────── الفاست فود (فئات + أصناف بأحجام وأسعار) ─────────────
+    // القراءة عامة (الموقع يعرضها)، الكتابة للأدمين فقط مع فحص القيم. الإيقاف/التشغيل = حقل enabled.
+    function validFfImage(v) {
+      return v is string && v.size() <= 400000 && (v == '' || v.matches('^data:image/(jpeg|png|webp);base64,.*'));
+    }
+    function validFfSize(s) {
+      return s.keys().hasOnly(['label', 'labelFr', 'price'])
+        && s.label is string && s.label.size() > 0 && s.label.size() <= 40
+        && s.get('labelFr', '') is string && s.get('labelFr', '').size() <= 40
+        && s.price is number && s.price >= 0 && s.price <= 100000;
+    }
+    function validFfSizes(l) {
+      return l is list && l.size() >= 1 && l.size() <= 6
+        && validFfSize(l[0])
+        && (l.size() < 2 || validFfSize(l[1]))
+        && (l.size() < 3 || validFfSize(l[2]))
+        && (l.size() < 4 || validFfSize(l[3]))
+        && (l.size() < 5 || validFfSize(l[4]))
+        && (l.size() < 6 || validFfSize(l[5]));
+    }
+    function validFfCat(d) {
+      return d.keys().hasOnly(['name', 'nameFr', 'image', 'order', 'enabled', 'updatedAt', 'updatedBy'])
+        && d.name is string && d.name.size() > 0 && d.name.size() <= 80
+        && d.get('nameFr', '') is string && d.get('nameFr', '').size() <= 80
+        && validFfImage(d.get('image', ''))
+        && d.order is number && d.order >= 0 && d.order <= 100000
+        && d.enabled is bool
+        && d.updatedAt == request.time && d.updatedBy == request.auth.uid;
+    }
+    function validFfItem(d) {
+      return d.keys().hasOnly(['catId', 'name', 'nameFr', 'description', 'descriptionFr', 'image', 'sizes', 'order', 'enabled', 'updatedAt', 'updatedBy'])
+        && d.catId is string && d.catId.size() > 0 && d.catId.size() <= 60
+        && d.name is string && d.name.size() > 0 && d.name.size() <= 120
+        && d.get('nameFr', '') is string && d.get('nameFr', '').size() <= 120
+        && d.get('description', '') is string && d.get('description', '').size() <= 1000
+        && d.get('descriptionFr', '') is string && d.get('descriptionFr', '').size() <= 1000
+        && validFfImage(d.get('image', ''))
+        && validFfSizes(d.sizes)
+        && d.order is number && d.order >= 0 && d.order <= 100000
+        && d.enabled is bool
+        && d.updatedAt == request.time && d.updatedBy == request.auth.uid;
+    }
+    match /fastFoodCats/{catId} {
+      allow read: if true;
+      allow create, update: if isAdmin() && validFfCat(request.resource.data);
+      allow delete: if isAdmin();
+    }
+    match /fastFoodItems/{itemId} {
+      allow read: if true;
+      allow create, update: if isAdmin() && validFfItem(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
     match /siteLinks/{linkId} {
       allow read: if true;
       allow create, update: if isAdmin() && validSiteLink(request.resource.data);

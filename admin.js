@@ -30,6 +30,7 @@ import { RECEIPT_METHODS } from "./receipts.js";
 import { renderLinksTab, initAdminLinks } from "./admin-links.js";
 import { renderAppIconTab, initAdminAppIcon } from "./admin-appicon.js";
 import { renderAdBannerTab, initAdminAdBanner } from "./admin-adbanner.js";
+import { renderFastFoodTab, initAdminFastFood } from "./admin-fastfood.js";
 import { renderVerifyTab, cleanupVerify, initAdminVerify } from "./admin-verify.js";
 import { renderWalletsTab, cleanupWallets, initAdminWallets } from "./admin-wallets.js";
 import { renderDriversTab, initAdminDrivers, mountAssignDriver, autoDispatchAfterAccept } from "./admin-drivers.js";
@@ -248,6 +249,7 @@ function renderAdminSidebar() {
     { id: "privacy", icon: ico("verify"), label: "سياسة الخصوصية" },
     { id: "links", icon: ico("link-other"), label: "روابطنا / مواقعنا" },
   { id: "appicon", icon: ico("link-other"), label: "أيقونة التطبيق" },
+  { id: "fastfood", icon: ico("dejeuner"), label: "الفاست فود" },
   { id: "adbanner", icon: ico("link-other"), label: "بانر الإعلانات" },
     { id: "loyalty", icon: ico("rewards"), label: "الولاء" },
     { id: "payments", icon: ico("paiement"), label: "طرق الدفع" },
@@ -372,6 +374,7 @@ async function switchTab(tab) {
   else if (tab === "links") await renderLinksTab(document.getElementById("adminContent"));
   else if (tab === "appicon") await renderAppIconTab(document.getElementById("adminContent"));
   else if (tab === "adbanner") await renderAdBannerTab(document.getElementById("adminContent"));
+  else if (tab === "fastfood") await renderFastFoodTab(document.getElementById("adminContent"));
   else if (tab === "loyalty") await renderLoyaltyTab();
   else if (tab === "payments") await renderPaymentsTab();
   else await renderSupportTab();
@@ -2012,6 +2015,7 @@ initAdminExtras({ toast, ico });
 initAdminLinks({ toast });
 initAdminAppIcon({ toast });
 initAdminAdBanner({ toast });
+initAdminFastFood({ toast });
 initAdminVerify({ toast });
 initAdminWallets({ toast });
 initAdminDrivers({ toast });
